@@ -1,0 +1,6 @@
+﻿{
+	"model": {
+		"type": "minecraft:model",
+		"model": "grand_builder:item/structure_selector"
+	}
+}

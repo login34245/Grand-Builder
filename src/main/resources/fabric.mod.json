@@ -1,0 +1,32 @@
+{
+	"schemaVersion": 1,
+	"id": "grand_builder",
+	"version": "${version}",
+	"name": "Grand Builder",
+	"description": "Эффектный Fabric-мод для анимированной постройки крупных структур с предпросмотром, управлением скоростью, паузой, откатом, сохранением своих структур и поддержкой внешних схем.",
+	"authors": [
+		"Login34245"
+	],
+	"contact": {
+		"homepage": "https://github.com/Login34245/Grand-Builder",
+		"sources": "https://github.com/Login34245/Grand-Builder",
+		"issues": "https://github.com/Login34245/Grand-Builder/issues"
+	},
+	"license": "MIT",
+	"icon": "assets/grand_builder/icon.png",
+	"environment": "*",
+	"entrypoints": {
+		"main": [
+			"dev.grandbuilder.GrandBuilderMod"
+		],
+		"client": [
+			"dev.grandbuilder.GrandBuilderModClient"
+		]
+	},
+	"depends": {
+		"fabricloader": ">=0.18.2",
+		"minecraft": "~1.21.11",
+		"java": ">=21",
+		"fabric-api": "*"
+	}
+}
