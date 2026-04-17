@@ -27,7 +27,7 @@ public class BuilderMenuScreen extends Screen {
 	private static final int YOUTUBE_TOOLTIP_MAX_WIDTH = 220;
 	private static final int STRUCTURES_TOOLTIP_MAX_WIDTH = 260;
 
-	private static String lastStructureKey = BuildStructure.GRAND_PALACE.selectionKey();
+	private static String lastStructureKey = StructureLibrary.defaultSelectionEntry().key();
 	private static BuildSpeed lastSpeed = BuildSpeed.NORMAL;
 	private static CustomCaptureFormat lastCaptureFormat = CustomCaptureFormat.SCHEM_SINGLE;
 
@@ -125,10 +125,7 @@ public class BuilderMenuScreen extends Screen {
 		this.structureChoices = new ArrayList<>(StructureListClientState.entries());
 		this.knownStructureListRevision = StructureListClientState.revision();
 		if (this.structureChoices.isEmpty()) {
-			this.structureChoices.add(new StructureLibrary.SelectionEntry(
-				BuildStructure.GRAND_PALACE.selectionKey(),
-				Component.translatable(BuildStructure.GRAND_PALACE.translationKey())
-			));
+			this.structureChoices.add(StructureLibrary.defaultSelectionEntry());
 		}
 
 		this.selectedStructureIndex = 0;

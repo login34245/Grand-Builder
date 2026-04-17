@@ -86,7 +86,11 @@ public class GrandBuilderMod implements ModInitializer {
 			if (!player.getItemInHand(hand).is(STRUCTURE_SELECTOR)) {
 				return net.minecraft.world.InteractionResult.PASS;
 			}
-			if (!world.isClientSide() && player instanceof ServerPlayer serverPlayer) {
+			if (world.isClientSide()) {
+				// Let the selector click reach the server, but stop normal block damage on the client.
+				return net.minecraft.world.InteractionResult.SUCCESS;
+			}
+			if (player instanceof ServerPlayer serverPlayer) {
 				StructureSelectionManager.setFirst(serverPlayer, pos);
 			}
 			return net.minecraft.world.InteractionResult.FAIL;

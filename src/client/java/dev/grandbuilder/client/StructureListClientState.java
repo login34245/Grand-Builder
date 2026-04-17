@@ -7,7 +7,7 @@ import java.util.List;
 import net.minecraft.network.chat.Component;
 
 public final class StructureListClientState {
-	private static volatile List<StructureLibrary.SelectionEntry> entries = StructureLibrary.listBuiltinSelections();
+	private static volatile List<StructureLibrary.SelectionEntry> entries = StructureLibrary.listPreferredSelections();
 	private static volatile int revision;
 
 	private StructureListClientState() {
@@ -17,13 +17,13 @@ public final class StructureListClientState {
 		List<StructureLibrary.SelectionEntry> updated = new ArrayList<>();
 		for (StructureListPayload.Entry entry : payload.entries()) {
 			Component displayName = entry.external()
-				? Component.translatable("structure.grand_builder.file", entry.displayName())
+				? Component.literal(entry.displayName())
 				: builtinDisplayName(entry);
 			updated.add(new StructureLibrary.SelectionEntry(entry.key(), displayName));
 		}
 
 		if (updated.isEmpty()) {
-			updated = StructureLibrary.listBuiltinSelections();
+			updated = StructureLibrary.listPreferredSelections();
 		}
 
 		entries = List.copyOf(updated);
@@ -39,7 +39,7 @@ public final class StructureListClientState {
 	}
 
 	public static void reset() {
-		entries = StructureLibrary.listBuiltinSelections();
+		entries = StructureLibrary.listPreferredSelections();
 		revision++;
 	}
 
