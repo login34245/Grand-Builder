@@ -1,11 +1,7 @@
 {
   "item.grand_builder.structure_core": "Builder Core",
   "itemGroup.grand_builder.main": "Grand Builder",
-  "structure.grand_builder.grand_palace": "Grand Palace",
-  "structure.grand_builder.sky_bastion": "Sky Bastion",
-  "structure.grand_builder.sun_arena": "Sun Arena",
   "structure.grand_builder.custom": "Custom Structure",
-  "structure.grand_builder.file": "File: %s",
   "speed.grand_builder.ultra_slow": "Precision I",
   "speed.grand_builder.glacial": "Precision II",
   "speed.grand_builder.very_slow": "Step-by-Step",

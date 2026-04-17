@@ -1,7 +1,6 @@
 package dev.grandbuilder.client;
 
 import dev.grandbuilder.build.BuildSpeed;
-import dev.grandbuilder.build.BuildStructure;
 import dev.grandbuilder.build.CustomCaptureFormat;
 import dev.grandbuilder.build.StructureLibrary;
 import dev.grandbuilder.network.BuildControlAction;

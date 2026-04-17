@@ -1,9 +1,9 @@
 # gradle
 
-.gradle/
-build/
-out/
-classes/
+/.gradle/
+/build/
+/out/
+/classes/
 
 # eclipse
 
@@ -30,7 +30,7 @@ bin/
 
 # fabric
 
-run/
+/run/
 
 # java
 
