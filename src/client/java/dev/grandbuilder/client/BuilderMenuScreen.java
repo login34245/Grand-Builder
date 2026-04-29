@@ -23,7 +23,11 @@ public class BuilderMenuScreen extends Screen {
 	private static final int PANEL_WIDTH = 346;
 	private static final int PANEL_HEIGHT = 316;
 	private static final int YOUTUBE_BADGE_SIZE = 18;
+	private static final int LANGUAGE_BUTTON_WIDTH = 64;
+	private static final String ENGLISH_LANGUAGE = "en_us";
+	private static final String RUSSIAN_LANGUAGE = "ru_ru";
 	private static final int YOUTUBE_TOOLTIP_MAX_WIDTH = 220;
+	private static final int LANGUAGE_TOOLTIP_MAX_WIDTH = 180;
 	private static final int STRUCTURES_TOOLTIP_MAX_WIDTH = 260;
 
 	private static String lastStructureKey = StructureLibrary.defaultSelectionEntry().key();
@@ -40,6 +44,7 @@ public class BuilderMenuScreen extends Screen {
 	private Button terrainButton;
 	private Button captureFormatButton;
 	private Button youtubeButton;
+	private Button languageButton;
 	private boolean terrainEnabled = true;
 	private int statusPollCooldown = 0;
 	private int knownStructureListRevision = -1;
@@ -110,6 +115,10 @@ public class BuilderMenuScreen extends Screen {
 			Component.translatable("screen.grand_builder.youtube.badge"),
 			button -> openYoutubeChannel()
 		).bounds(youtubeBadgeLeft, youtubeBadgeTop, YOUTUBE_BADGE_SIZE, YOUTUBE_BADGE_SIZE).build());
+		this.languageButton = this.addRenderableWidget(Button.builder(
+			languageMessage(),
+			button -> switchLanguage()
+		).bounds(left + PANEL_WIDTH - 22 - LANGUAGE_BUTTON_WIDTH, top + 8, LANGUAGE_BUTTON_WIDTH, YOUTUBE_BADGE_SIZE).build());
 
 		sendControl(BuildControlAction.STATUS_SILENT);
 		this.statusPollCooldown = 10;
@@ -184,6 +193,76 @@ public class BuilderMenuScreen extends Screen {
 				? "screen.grand_builder.terrain_enabled"
 				: "screen.grand_builder.terrain_disabled"
 		);
+	}
+
+	private Component languageMessage() {
+		return Component.translatable("screen.grand_builder.language_value", languageDisplayCode(currentLanguageCode()));
+	}
+
+	private String currentLanguageCode() {
+		if (this.minecraft == null) {
+			return ENGLISH_LANGUAGE;
+		}
+		return this.minecraft.options.languageCode;
+	}
+
+	private String languageDisplayCode(String languageCode) {
+		if (RUSSIAN_LANGUAGE.equals(languageCode)) {
+			return "RU";
+		}
+		if (ENGLISH_LANGUAGE.equals(languageCode)) {
+			return "EN";
+		}
+		return languageCode.toUpperCase(Locale.ROOT);
+	}
+
+	private void switchLanguage() {
+		if (this.minecraft == null) {
+			return;
+		}
+
+		String nextLanguage = RUSSIAN_LANGUAGE.equals(currentLanguageCode())
+			? ENGLISH_LANGUAGE
+			: RUSSIAN_LANGUAGE;
+		this.minecraft.getLanguageManager().setSelected(nextLanguage);
+		this.minecraft.options.languageCode = nextLanguage;
+		this.minecraft.options.save();
+		refreshButtonMessages();
+		this.minecraft.reloadResourcePacks().thenRun(() -> {
+			if (this.minecraft != null) {
+				this.minecraft.execute(this::refreshButtonMessages);
+			}
+		});
+		if (this.minecraft.player != null) {
+			this.minecraft.player.displayClientMessage(
+				Component.translatable("screen.grand_builder.language_changed", languageDisplayCode(nextLanguage)),
+				true
+			);
+		}
+	}
+
+	private void refreshButtonMessages() {
+		if (this.structureButton != null) {
+			this.structureButton.setMessage(structureMessage());
+		}
+		if (this.folderButton != null) {
+			this.folderButton.setMessage(Component.translatable("screen.grand_builder.open_structures"));
+		}
+		if (this.speedButton != null) {
+			this.speedButton.setMessage(speedMessage());
+		}
+		if (this.terrainButton != null) {
+			this.terrainButton.setMessage(terrainMessage());
+		}
+		if (this.captureFormatButton != null) {
+			this.captureFormatButton.setMessage(captureFormatMessage());
+		}
+		if (this.languageButton != null) {
+			this.languageButton.setMessage(languageMessage());
+		}
+		if (this.youtubeButton != null) {
+			this.youtubeButton.setMessage(Component.translatable("screen.grand_builder.youtube.badge"));
+		}
 	}
 
 	@Override
@@ -261,7 +340,18 @@ public class BuilderMenuScreen extends Screen {
 
 		super.render(guiGraphics, mouseX, mouseY, partialTick);
 		renderStructuresFolderTooltip(guiGraphics, mouseX, mouseY);
+		renderLanguageTooltip(guiGraphics, mouseX, mouseY);
 		renderYoutubeBadge(guiGraphics, mouseX, mouseY);
+	}
+
+	private void renderLanguageTooltip(GuiGraphics guiGraphics, int mouseX, int mouseY) {
+		if (languageButton == null || !languageButton.isHovered()) {
+			return;
+		}
+
+		List<String> tooltipLines = new ArrayList<>();
+		tooltipLines.add(Component.translatable("screen.grand_builder.language_tooltip").getString());
+		renderTextTooltip(guiGraphics, mouseX + 12, mouseY - 6, tooltipLines, LANGUAGE_TOOLTIP_MAX_WIDTH);
 	}
 
 	private void renderStructuresFolderTooltip(GuiGraphics guiGraphics, int mouseX, int mouseY) {
