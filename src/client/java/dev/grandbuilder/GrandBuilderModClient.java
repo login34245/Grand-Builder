@@ -3,16 +3,19 @@ package dev.grandbuilder;
 import com.mojang.blaze3d.platform.InputConstants;
 import dev.grandbuilder.client.BuilderMenuScreen;
 import dev.grandbuilder.client.BuildStatusClientState;
+import dev.grandbuilder.client.GrandBuilderClientEffects;
 import dev.grandbuilder.client.PreviewConfirmState;
 import dev.grandbuilder.client.StructureListClientState;
 import dev.grandbuilder.network.BuildControlAction;
 import dev.grandbuilder.network.BuildControlPayload;
+import dev.grandbuilder.network.BuildEffectPayload;
 import dev.grandbuilder.network.BuildStatusPayload;
 import dev.grandbuilder.network.StructureListPayload;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.fabricmc.fabric.api.event.player.UseItemCallback;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.KeyMapping;
@@ -52,8 +55,13 @@ public class GrandBuilderModClient implements ClientModInitializer {
 		ClientPlayNetworking.registerGlobalReceiver(StructureListPayload.TYPE, (payload, context) ->
 			context.client().execute(() -> StructureListClientState.update(payload))
 		);
+		ClientPlayNetworking.registerGlobalReceiver(BuildEffectPayload.TYPE, (payload, context) ->
+			context.client().execute(() -> GrandBuilderClientEffects.trigger(payload))
+		);
+		HudRenderCallback.EVENT.register(GrandBuilderClientEffects::render);
 
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
+			GrandBuilderClientEffects.tick(client);
 			if (client.player == null) {
 				PreviewConfirmState.disarm();
 				return;

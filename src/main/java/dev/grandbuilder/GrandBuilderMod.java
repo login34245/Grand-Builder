@@ -11,6 +11,7 @@ import dev.grandbuilder.item.StructureCoreItem;
 import dev.grandbuilder.item.StructureSelectorItem;
 import dev.grandbuilder.network.BuildControlAction;
 import dev.grandbuilder.network.BuildControlPayload;
+import dev.grandbuilder.network.BuildEffectPayload;
 import dev.grandbuilder.network.BuildRequestPayload;
 import dev.grandbuilder.network.BuildSetSpeedPayload;
 import dev.grandbuilder.network.BuildStatusPayload;
@@ -80,6 +81,7 @@ public class GrandBuilderMod implements ModInitializer {
 		PayloadTypeRegistry.playC2S().register(BuildControlPayload.TYPE, BuildControlPayload.CODEC);
 		PayloadTypeRegistry.playC2S().register(BuildSetSpeedPayload.TYPE, BuildSetSpeedPayload.CODEC);
 		PayloadTypeRegistry.playC2S().register(CaptureRequestPayload.TYPE, CaptureRequestPayload.CODEC);
+		PayloadTypeRegistry.playS2C().register(BuildEffectPayload.TYPE, BuildEffectPayload.CODEC);
 		PayloadTypeRegistry.playS2C().register(BuildStatusPayload.TYPE, BuildStatusPayload.CODEC);
 		PayloadTypeRegistry.playS2C().register(StructureListPayload.TYPE, StructureListPayload.CODEC);
 

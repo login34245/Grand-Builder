@@ -2,6 +2,7 @@ package dev.grandbuilder.build;
 
 import dev.grandbuilder.GrandBuilderMod;
 import dev.grandbuilder.config.GrandBuilderConfig;
+import dev.grandbuilder.network.BuildEffectPayload;
 import dev.grandbuilder.network.BuildStatusPayload;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -52,6 +53,7 @@ public final class AnimatedBuildManager {
 	private static final int TERRAIN_FILL_STAGE_BASE = 2_000_000;
 	private static final int TERRAIN_CLEAR_STAGE_BASE = 2_100_000;
 	private static final int VEGETATION_CLEAR_STAGE_BASE = 2_200_000;
+	private static final int UFO_REVEAL_DELAY_TICKS = 54;
 	private static final Comparator<GrandPalaceBlueprint.RelativeBlock> BLOCK_BUILD_ORDER = Comparator
 		.comparingInt(GrandPalaceBlueprint.RelativeBlock::stage)
 		.thenComparingInt(GrandPalaceBlueprint.RelativeBlock::y)
@@ -206,6 +208,9 @@ public final class AnimatedBuildManager {
 		BuildSpeed speed = getSpeed(player.getUUID());
 		player.displayClientMessage(Component.translatable("message.grand_builder.started", preview.structureName(), speed.displayRate()), true);
 		player.level().playSound(player, player.blockPosition(), SoundEvents.BEACON_POWER_SELECT, SoundSource.PLAYERS, 1.0f, 0.8f);
+		if (preview.effectMode() == BuildEffectMode.UFO_INVASION) {
+			sendBuildEffect(player, preview.effectMode(), BuildEffectPayload.PHASE_ARRIVAL, UFO_REVEAL_DELAY_TICKS + 16, 1.05f);
+		}
 	}
 
 	public static void cancelPreview(ServerPlayer player) {
@@ -667,7 +672,7 @@ public final class AnimatedBuildManager {
 				owner.displayClientMessage(Component.translatable("message.grand_builder.owner_back_resume"), true);
 			}
 
-			boolean finished = job.tick(level, getSpeed(job.ownerId), config);
+			boolean finished = job.tick(level, owner, getSpeed(job.ownerId), config);
 			if (owner != null && (job.statusPulse++ % 20) == 0) {
 				sendBuildStatus(owner, false);
 			}
@@ -1531,6 +1536,10 @@ public final class AnimatedBuildManager {
 		));
 	}
 
+	private static void sendBuildEffect(ServerPlayer player, BuildEffectMode effectMode, int phaseId, int durationTicks, float intensity) {
+		ServerPlayNetworking.send(player, new BuildEffectPayload(effectMode.networkId(), phaseId, durationTicks, intensity));
+	}
+
 	private static BuildJob findJob(UUID playerId) {
 		for (BuildJob job : ACTIVE_BUILDS) {
 			if (job.ownerId.equals(playerId)) {
@@ -1974,6 +1983,7 @@ public final class AnimatedBuildManager {
 		private int statusPulse;
 		private int skippedBlocks;
 		private boolean waitingForChunks;
+		private boolean instantRevealPlacement;
 
 		private BuildJob(
 			ResourceKey<Level> dimensionKey,
@@ -2006,10 +2016,13 @@ public final class AnimatedBuildManager {
 			this.totalBlocks = this.dryBlocks.size() + this.fluidBlocks.size();
 		}
 
-		private boolean tick(ServerLevel level, BuildSpeed speed, GrandBuilderConfig config) {
+		private boolean tick(ServerLevel level, ServerPlayer owner, BuildSpeed speed, GrandBuilderConfig config) {
 			if (paused || pausedByOffline) {
 				waitingForChunks = false;
 				return false;
+			}
+			if (effectMode == BuildEffectMode.UFO_INVASION) {
+				return tickUfoReveal(level, owner, config);
 			}
 			tickBuildEffect(level);
 			tickDelayCounter++;
@@ -2053,6 +2066,80 @@ public final class AnimatedBuildManager {
 			return dryCursor >= dryBlocks.size() && fluidCursor >= fluidBlocks.size();
 		}
 
+		private boolean tickUfoReveal(ServerLevel level, ServerPlayer owner, GrandBuilderConfig config) {
+			tickBuildEffect(level);
+			if (effectTick < UFO_REVEAL_DELAY_TICKS) {
+				waitingForChunks = false;
+				return false;
+			}
+
+			if (!areTargetChunksReady(level, config)) {
+				waitingForChunks = true;
+				return false;
+			}
+
+			waitingForChunks = false;
+			boolean finished = placeAllInstantly(level, config);
+			if (finished) {
+				spawnUfoRevealBurst(level);
+				if (owner != null) {
+					sendBuildEffect(owner, effectMode, BuildEffectPayload.PHASE_REVEAL, 28, 1.85f);
+				}
+			}
+			return finished;
+		}
+
+		private boolean areTargetChunksReady(ServerLevel level, GrandBuilderConfig config) {
+			if (!config.pauseWhenChunksMissing) {
+				return true;
+			}
+
+			for (GrandPalaceBlueprint.RelativeBlock block : dryBlocks) {
+				BlockPos targetPos = transform(origin, facing, block);
+				if (level.isInWorldBounds(targetPos) && !level.isLoaded(targetPos)) {
+					return false;
+				}
+			}
+			for (GrandPalaceBlueprint.RelativeBlock block : fluidBlocks) {
+				BlockPos targetPos = transform(origin, facing, block);
+				if (level.isInWorldBounds(targetPos) && !level.isLoaded(targetPos)) {
+					return false;
+				}
+			}
+			return true;
+		}
+
+		private boolean placeAllInstantly(ServerLevel level, GrandBuilderConfig config) {
+			instantRevealPlacement = true;
+			try {
+				while (dryCursor < dryBlocks.size()) {
+					PlacementResult result = placeBlock(level, dryBlocks.get(dryCursor), dryCursor + 1, config);
+					if (result == PlacementResult.WAITING_FOR_CHUNK) {
+						waitingForChunks = true;
+						return false;
+					}
+					dryCursor++;
+					if (result == PlacementResult.SKIPPED) {
+						skippedBlocks++;
+					}
+				}
+				while (fluidCursor < fluidBlocks.size()) {
+					PlacementResult result = placeBlock(level, fluidBlocks.get(fluidCursor), dryBlocks.size() + fluidCursor + 1, config);
+					if (result == PlacementResult.WAITING_FOR_CHUNK) {
+						waitingForChunks = true;
+						return false;
+					}
+					fluidCursor++;
+					if (result == PlacementResult.SKIPPED) {
+						skippedBlocks++;
+					}
+				}
+			} finally {
+				instantRevealPlacement = false;
+			}
+			return true;
+		}
+
 		private void tickBuildEffect(ServerLevel level) {
 			if (effectMode != BuildEffectMode.UFO_INVASION) {
 				return;
@@ -2064,7 +2151,7 @@ public final class AnimatedBuildManager {
 			double buildWidth = Math.max(1.0, effectBounds.maxX() - effectBounds.minX() + 1.0);
 			double buildDepth = Math.max(1.0, effectBounds.maxZ() - effectBounds.minZ() + 1.0);
 			double radius = Math.max(4.0, Math.min(18.0, Math.max(buildWidth, buildDepth) * 0.62));
-			double arrival = Math.max(0.0, 1.0 - effectTick / 70.0);
+			double arrival = Math.max(0.0, 1.0 - Math.min(1.0, effectTick / (double) UFO_REVEAL_DELAY_TICKS));
 			double shipX = centerX - facing.getStepX() * arrival * (radius + 16.0);
 			double shipZ = centerZ - facing.getStepZ() * arrival * (radius + 16.0);
 			double shipY = Math.min(level.getMaxY() - 2.0, effectBounds.maxY() + 8.0 + Math.sin(effectTick * 0.10) * 1.1);
@@ -2089,12 +2176,65 @@ public final class AnimatedBuildManager {
 				}
 			}
 
-			if (effectTick <= 70 && (effectTick % 5) == 0) {
+			double beamRadius = Math.min(3.8, Math.max(1.4, radius * 0.22));
+			if (arrival <= 0.18) {
+				level.sendParticles(ParticleTypes.ELECTRIC_SPARK, centerX, effectBounds.minY() + 1.0, centerZ, 10, beamRadius, 0.35, beamRadius, 0.08);
+				level.sendParticles(ParticleTypes.END_ROD, centerX, effectBounds.minY() + 1.2, centerZ, 8, beamRadius * 0.75, 0.45, beamRadius * 0.75, 0.05);
+			}
+
+			if (effectTick <= UFO_REVEAL_DELAY_TICKS && (effectTick % 5) == 0) {
 				level.sendParticles(ParticleTypes.SONIC_BOOM, shipX, shipY, shipZ, 1, 0.0, 0.0, 0.0, 0.0);
 			}
-			if ((effectTick % 45) == 1) {
+			if ((effectTick % 16) == 1) {
 				level.playSound(null, BlockPos.containing(shipX, shipY, shipZ), SoundEvents.PORTAL_AMBIENT, SoundSource.BLOCKS, 0.45f, 0.65f);
+				level.playSound(null, BlockPos.containing(shipX, shipY, shipZ), SoundEvents.BEACON_AMBIENT, SoundSource.BLOCKS, 0.35f, 1.8f);
 			}
+		}
+
+		private void spawnUfoRevealBurst(ServerLevel level) {
+			double centerX = (effectBounds.minX() + effectBounds.maxX()) * 0.5 + 0.5;
+			double centerY = Math.min(level.getMaxY() - 2.0, effectBounds.maxY() + 2.2);
+			double centerZ = (effectBounds.minZ() + effectBounds.maxZ()) * 0.5 + 0.5;
+			double width = Math.max(1.0, effectBounds.maxX() - effectBounds.minX() + 1.0);
+			double depth = Math.max(1.0, effectBounds.maxZ() - effectBounds.minZ() + 1.0);
+			double radius = Math.max(3.5, Math.min(20.0, Math.max(width, depth) * 0.56));
+			BlockPos center = BlockPos.containing(centerX, centerY, centerZ);
+
+			level.sendParticles(ParticleTypes.SONIC_BOOM, centerX, centerY, centerZ, 1, 0.0, 0.0, 0.0, 0.0);
+			level.sendParticles(ParticleTypes.EXPLOSION_EMITTER, centerX, centerY, centerZ, 1, 0.0, 0.0, 0.0, 0.0);
+			level.sendParticles(ParticleTypes.ELECTRIC_SPARK, centerX, centerY, centerZ, 180, radius, 3.0, radius, 0.28);
+			level.sendParticles(ParticleTypes.END_ROD, centerX, centerY, centerZ, 140, radius * 0.65, 2.5, radius * 0.65, 0.18);
+			level.sendParticles(ParticleTypes.REVERSE_PORTAL, centerX, centerY - 1.1, centerZ, 130, radius * 0.45, 1.7, radius * 0.45, 0.12);
+			level.playSound(null, center, SoundEvents.END_PORTAL_SPAWN, SoundSource.BLOCKS, 1.2f, 1.35f);
+			level.playSound(null, center, SoundEvents.TRIDENT_THUNDER.value(), SoundSource.BLOCKS, 1.0f, 1.85f);
+			level.playSound(null, center, SoundEvents.BEACON_DEACTIVATE, SoundSource.BLOCKS, 0.9f, 0.55f);
+
+			int sampleCount = Math.min(180, totalBlocks);
+			if (sampleCount <= 0) {
+				return;
+			}
+			int stride = Math.max(1, totalBlocks / sampleCount);
+			for (int index = 0, spawned = 0; index < totalBlocks && spawned < sampleCount; index += stride, spawned++) {
+				GrandPalaceBlueprint.RelativeBlock block = blockAt(index);
+				BlockPos pos = transform(origin, facing, block);
+				if (!level.isInWorldBounds(pos)) {
+					continue;
+				}
+				double x = pos.getX() + 0.5;
+				double y = pos.getY() + 0.65;
+				double z = pos.getZ() + 0.5;
+				level.sendParticles(ParticleTypes.ELECTRIC_SPARK, x, y, z, 2, 0.22, 0.25, 0.22, 0.08);
+				if ((spawned & 1) == 0) {
+					level.sendParticles(ParticleTypes.END_ROD, x, y + 0.25, z, 1, 0.10, 0.16, 0.10, 0.02);
+				}
+			}
+		}
+
+		private GrandPalaceBlueprint.RelativeBlock blockAt(int index) {
+			if (index < dryBlocks.size()) {
+				return dryBlocks.get(index);
+			}
+			return fluidBlocks.get(index - dryBlocks.size());
 		}
 
 		private void finishEffects(ServerLevel level) {
@@ -2136,7 +2276,7 @@ public final class AnimatedBuildManager {
 			level.setBlock(targetPos, rotatedState, 2);
 			applyBlockEntityData(level, targetPos, rotatedState, block.blockEntityNbt());
 
-			if (effectMode == BuildEffectMode.UFO_INVASION) {
+			if (effectMode == BuildEffectMode.UFO_INVASION && !instantRevealPlacement) {
 				spawnUfoPlacementEffect(level, targetPos, progressIndex);
 			} else if ((progressIndex & 7) == 0) {
 				level.sendParticles(ParticleTypes.END_ROD, targetPos.getX() + 0.5, targetPos.getY() + 0.5, targetPos.getZ() + 0.5, 1, 0.25, 0.25, 0.25, 0.01);
