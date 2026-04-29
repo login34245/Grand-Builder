@@ -39,6 +39,7 @@ import net.minecraft.world.level.block.state.BlockState;
 
 public final class AnimatedBuildManager {
 	private static final Map<UUID, BuildSpeed> SPEED_BY_PLAYER = new HashMap<>();
+	private static final Map<UUID, BuildEffectMode> EFFECT_MODE_BY_PLAYER = new HashMap<>();
 	private static final Map<UUID, Boolean> TERRAIN_ADAPTATION_BY_PLAYER = new HashMap<>();
 	private static final Map<UUID, String> SELECTION_KEY_BY_PLAYER = new HashMap<>();
 	private static final Map<UUID, List<GrandPalaceBlueprint.RelativeBlock>> CUSTOM_BLUEPRINT_BY_PLAYER = new HashMap<>();
@@ -60,13 +61,18 @@ public final class AnimatedBuildManager {
 	private AnimatedBuildManager() {
 	}
 
-	public static void setSelection(UUID playerId, String selectionKey, BuildSpeed speed) {
+	public static void setSelection(UUID playerId, String selectionKey, BuildSpeed speed, BuildEffectMode effectMode) {
 		SELECTION_KEY_BY_PLAYER.put(playerId, selectionKey);
 		SPEED_BY_PLAYER.put(playerId, speed);
+		EFFECT_MODE_BY_PLAYER.put(playerId, effectMode);
 	}
 
 	public static BuildSpeed getSpeed(UUID playerId) {
 		return SPEED_BY_PLAYER.getOrDefault(playerId, BuildSpeed.NORMAL);
+	}
+
+	public static BuildEffectMode getEffectMode(UUID playerId) {
+		return EFFECT_MODE_BY_PLAYER.getOrDefault(playerId, BuildEffectMode.STANDARD);
 	}
 
 	public static String getSelectionKey(UUID playerId) {
@@ -122,6 +128,7 @@ public final class AnimatedBuildManager {
 			facing,
 			selection.structure().displayName(),
 			blueprint,
+			getEffectMode(player.getUUID()),
 			config.previewSampleCap,
 			config
 		);
@@ -143,6 +150,12 @@ public final class AnimatedBuildManager {
 			Component.translatable("key.grand_builder.confirm_preview"),
 			Component.translatable("key.grand_builder.cancel_preview")
 		), true);
+		if (preview.effectMode() != BuildEffectMode.STANDARD) {
+			player.displayClientMessage(Component.translatable(
+				"message.grand_builder.preview_effect",
+				Component.translatable(preview.effectMode().translationKey())
+			), true);
+		}
 
 		if (ONBOARDED_PLAYERS.add(player.getUUID())) {
 			player.displayClientMessage(Component.translatable("message.grand_builder.onboarding"), false);
@@ -181,7 +194,7 @@ public final class AnimatedBuildManager {
 		}
 
 		PENDING_PREVIEW_BY_PLAYER.remove(player.getUUID());
-		BuildJob job = createBuildJob(player, preview.structureName(), preview.blocks, preview.origin, preview.facing);
+		BuildJob job = createBuildJob(player, preview.structureName(), preview.blocks, preview.origin, preview.facing, preview.effectMode());
 		if (job == null) {
 			return;
 		}
@@ -663,6 +676,7 @@ public final class AnimatedBuildManager {
 			}
 
 			if (finished) {
+				job.finishEffects(level);
 				if (owner != null) {
 					owner.displayClientMessage(Component.translatable("message.grand_builder.completed", job.structureName), true);
 					if (job.skippedBlocks > 0) {
@@ -708,6 +722,7 @@ public final class AnimatedBuildManager {
 		PENDING_ROLLBACK_CONFIRM_UNTIL_TICK.remove(playerId);
 		LAST_ACTION_TICK_BY_PLAYER.remove(playerId);
 		TERRAIN_ADAPTATION_BY_PLAYER.remove(playerId);
+		EFFECT_MODE_BY_PLAYER.remove(playerId);
 	}
 
 	public static void shutdown() {
@@ -716,6 +731,7 @@ public final class AnimatedBuildManager {
 		PENDING_ROLLBACK_CONFIRM_UNTIL_TICK.clear();
 		LAST_ACTION_TICK_BY_PLAYER.clear();
 		TERRAIN_ADAPTATION_BY_PLAYER.clear();
+		EFFECT_MODE_BY_PLAYER.clear();
 		GrandBuilderMod.LOGGER.info("Grand Builder runtime state cleared");
 	}
 
@@ -825,7 +841,8 @@ public final class AnimatedBuildManager {
 		Component structureName,
 		List<GrandPalaceBlueprint.RelativeBlock> blueprint,
 		BlockPos origin,
-		Direction facing
+		Direction facing,
+		BuildEffectMode effectMode
 	) {
 		if (blueprint.isEmpty()) {
 			return null;
@@ -851,8 +868,9 @@ public final class AnimatedBuildManager {
 			player.displayClientMessage(Component.translatable("message.grand_builder.terrain_prepared", terrainBlocksAdded), true);
 		}
 
+		BuildBounds effectBounds = computeBuildBounds(origin, facing, finalBlueprint);
 		RollbackData rollbackData = captureRollbackSnapshot(player.level(), player.level().dimension(), structureName, origin, facing, finalBlueprint);
-		return new BuildJob(player.level().dimension(), origin, facing, player.getUUID(), structureName, finalBlueprint, rollbackData);
+		return new BuildJob(player.level().dimension(), origin, facing, player.getUUID(), structureName, finalBlueprint, rollbackData, effectMode, effectBounds);
 	}
 
 	private static List<GrandPalaceBlueprint.RelativeBlock> mergeBlueprintBlocks(
@@ -1658,6 +1676,7 @@ public final class AnimatedBuildManager {
 		private final Direction facing;
 		private final Component structureName;
 		private final List<GrandPalaceBlueprint.RelativeBlock> blocks;
+		private final BuildEffectMode effectMode;
 		private final int totalBlocks;
 		private final int minX;
 		private final int maxX;
@@ -1671,12 +1690,13 @@ public final class AnimatedBuildManager {
 		private int conflictCursor;
 		private int tickCounter;
 
-		private PendingPreview(ServerLevel level, ResourceKey<Level> dimensionKey, BlockPos origin, Direction facing, Component structureName, List<GrandPalaceBlueprint.RelativeBlock> blocks, int sampleCap, GrandBuilderConfig config) {
+		private PendingPreview(ServerLevel level, ResourceKey<Level> dimensionKey, BlockPos origin, Direction facing, Component structureName, List<GrandPalaceBlueprint.RelativeBlock> blocks, BuildEffectMode effectMode, int sampleCap, GrandBuilderConfig config) {
 			this.dimensionKey = dimensionKey;
 			this.origin = origin;
 			this.facing = facing;
 			this.structureName = structureName;
 			this.blocks = blocks;
+			this.effectMode = effectMode;
 			this.totalBlocks = blocks.size();
 
 			int localMinX = 0;
@@ -1927,6 +1947,10 @@ public final class AnimatedBuildManager {
 		private Component structureName() {
 			return structureName;
 		}
+
+		private BuildEffectMode effectMode() {
+			return effectMode;
+		}
 	}
 
 	private static final class BuildJob {
@@ -1938,17 +1962,30 @@ public final class AnimatedBuildManager {
 		private final List<GrandPalaceBlueprint.RelativeBlock> dryBlocks;
 		private final List<GrandPalaceBlueprint.RelativeBlock> fluidBlocks;
 		private final RollbackData rollbackData;
+		private final BuildEffectMode effectMode;
+		private final BuildBounds effectBounds;
 		private final int totalBlocks;
 		private int dryCursor;
 		private int fluidCursor;
 		private boolean paused;
 		private boolean pausedByOffline;
 		private int tickDelayCounter;
+		private int effectTick;
 		private int statusPulse;
 		private int skippedBlocks;
 		private boolean waitingForChunks;
 
-		private BuildJob(ResourceKey<Level> dimensionKey, BlockPos origin, Direction facing, UUID ownerId, Component structureName, List<GrandPalaceBlueprint.RelativeBlock> blocks, RollbackData rollbackData) {
+		private BuildJob(
+			ResourceKey<Level> dimensionKey,
+			BlockPos origin,
+			Direction facing,
+			UUID ownerId,
+			Component structureName,
+			List<GrandPalaceBlueprint.RelativeBlock> blocks,
+			RollbackData rollbackData,
+			BuildEffectMode effectMode,
+			BuildBounds effectBounds
+		) {
 			this.dimensionKey = dimensionKey;
 			this.origin = origin;
 			this.facing = facing;
@@ -1964,6 +2001,8 @@ public final class AnimatedBuildManager {
 				}
 			}
 			this.rollbackData = rollbackData;
+			this.effectMode = effectMode;
+			this.effectBounds = effectBounds;
 			this.totalBlocks = this.dryBlocks.size() + this.fluidBlocks.size();
 		}
 
@@ -1972,6 +2011,7 @@ public final class AnimatedBuildManager {
 				waitingForChunks = false;
 				return false;
 			}
+			tickBuildEffect(level);
 			tickDelayCounter++;
 			if (tickDelayCounter < Math.max(1, speed.tickDelay())) {
 				waitingForChunks = false;
@@ -2013,6 +2053,66 @@ public final class AnimatedBuildManager {
 			return dryCursor >= dryBlocks.size() && fluidCursor >= fluidBlocks.size();
 		}
 
+		private void tickBuildEffect(ServerLevel level) {
+			if (effectMode != BuildEffectMode.UFO_INVASION) {
+				return;
+			}
+
+			effectTick++;
+			double centerX = (effectBounds.minX() + effectBounds.maxX()) * 0.5 + 0.5;
+			double centerZ = (effectBounds.minZ() + effectBounds.maxZ()) * 0.5 + 0.5;
+			double buildWidth = Math.max(1.0, effectBounds.maxX() - effectBounds.minX() + 1.0);
+			double buildDepth = Math.max(1.0, effectBounds.maxZ() - effectBounds.minZ() + 1.0);
+			double radius = Math.max(4.0, Math.min(18.0, Math.max(buildWidth, buildDepth) * 0.62));
+			double arrival = Math.max(0.0, 1.0 - effectTick / 70.0);
+			double shipX = centerX - facing.getStepX() * arrival * (radius + 16.0);
+			double shipZ = centerZ - facing.getStepZ() * arrival * (radius + 16.0);
+			double shipY = Math.min(level.getMaxY() - 2.0, effectBounds.maxY() + 8.0 + Math.sin(effectTick * 0.10) * 1.1);
+			double beamBottom = effectBounds.minY() + 0.35;
+			double spin = effectTick * 0.20;
+
+			for (int i = 0; i < 24; i++) {
+				double angle = spin + (Math.PI * 2.0 * i) / 24.0;
+				double x = shipX + Math.cos(angle) * radius;
+				double z = shipZ + Math.sin(angle) * radius;
+				double y = shipY + Math.sin(angle * 3.0 + effectTick * 0.12) * 0.25;
+				level.sendParticles(i % 3 == 0 ? ParticleTypes.ELECTRIC_SPARK : ParticleTypes.END_ROD, x, y, z, 1, 0.02, 0.02, 0.02, 0.0);
+			}
+
+			for (int i = 0; i < 9; i++) {
+				double t = i / 8.0;
+				double y = shipY + (beamBottom - shipY) * t;
+				double spread = 0.18 + t * Math.min(2.4, radius * 0.18);
+				level.sendParticles(ParticleTypes.REVERSE_PORTAL, shipX, y, shipZ, 2, spread, 0.03, spread, 0.02);
+				if ((effectTick + i) % 3 == 0) {
+					level.sendParticles(ParticleTypes.WITCH, shipX, y, shipZ, 1, spread * 0.65, 0.02, spread * 0.65, 0.0);
+				}
+			}
+
+			if (effectTick <= 70 && (effectTick % 5) == 0) {
+				level.sendParticles(ParticleTypes.SONIC_BOOM, shipX, shipY, shipZ, 1, 0.0, 0.0, 0.0, 0.0);
+			}
+			if ((effectTick % 45) == 1) {
+				level.playSound(null, BlockPos.containing(shipX, shipY, shipZ), SoundEvents.PORTAL_AMBIENT, SoundSource.BLOCKS, 0.45f, 0.65f);
+			}
+		}
+
+		private void finishEffects(ServerLevel level) {
+			if (effectMode != BuildEffectMode.UFO_INVASION) {
+				return;
+			}
+
+			double centerX = (effectBounds.minX() + effectBounds.maxX()) * 0.5 + 0.5;
+			double centerY = Math.min(level.getMaxY() - 2.0, effectBounds.maxY() + 4.0);
+			double centerZ = (effectBounds.minZ() + effectBounds.maxZ()) * 0.5 + 0.5;
+			level.sendParticles(ParticleTypes.EXPLOSION, centerX, centerY, centerZ, 1, 0.0, 0.0, 0.0, 0.0);
+			level.sendParticles(ParticleTypes.EXPLOSION_EMITTER, centerX, centerY, centerZ, 1, 0.0, 0.0, 0.0, 0.0);
+			level.sendParticles(ParticleTypes.END_ROD, centerX, centerY, centerZ, 80, 4.0, 2.0, 4.0, 0.10);
+			level.sendParticles(ParticleTypes.ELECTRIC_SPARK, centerX, centerY, centerZ, 90, 5.5, 2.5, 5.5, 0.18);
+			level.playSound(null, BlockPos.containing(centerX, centerY, centerZ), SoundEvents.END_PORTAL_SPAWN, SoundSource.BLOCKS, 0.9f, 1.25f);
+			level.playSound(null, BlockPos.containing(centerX, centerY, centerZ), SoundEvents.BEACON_ACTIVATE, SoundSource.BLOCKS, 1.0f, 1.4f);
+		}
+
 		private PlacementResult placeBlock(ServerLevel level, GrandPalaceBlueprint.RelativeBlock block, int progressIndex, GrandBuilderConfig config) {
 			BlockPos targetPos = transform(origin, facing, block);
 			if (!level.isInWorldBounds(targetPos)) {
@@ -2036,14 +2136,36 @@ public final class AnimatedBuildManager {
 			level.setBlock(targetPos, rotatedState, 2);
 			applyBlockEntityData(level, targetPos, rotatedState, block.blockEntityNbt());
 
-			if ((progressIndex & 7) == 0) {
+			if (effectMode == BuildEffectMode.UFO_INVASION) {
+				spawnUfoPlacementEffect(level, targetPos, progressIndex);
+			} else if ((progressIndex & 7) == 0) {
 				level.sendParticles(ParticleTypes.END_ROD, targetPos.getX() + 0.5, targetPos.getY() + 0.5, targetPos.getZ() + 0.5, 1, 0.25, 0.25, 0.25, 0.01);
 			}
-			if ((progressIndex % 24) == 0) {
+			if (effectMode != BuildEffectMode.UFO_INVASION && (progressIndex % 24) == 0) {
 				level.playSound(null, targetPos, SoundEvents.AMETHYST_BLOCK_CHIME, SoundSource.BLOCKS, 0.25f, 1.20f);
 			}
 
 			return PlacementResult.PLACED;
+		}
+
+		private void spawnUfoPlacementEffect(ServerLevel level, BlockPos targetPos, int progressIndex) {
+			double x = targetPos.getX() + 0.5;
+			double y = targetPos.getY() + 0.62;
+			double z = targetPos.getZ() + 0.5;
+			level.sendParticles(ParticleTypes.ELECTRIC_SPARK, x, y, z, 2, 0.30, 0.25, 0.30, 0.04);
+			if ((progressIndex & 1) == 0) {
+				level.sendParticles(ParticleTypes.REVERSE_PORTAL, x, y, z, 2, 0.20, 0.20, 0.20, 0.03);
+			}
+			if ((progressIndex % 6) == 0) {
+				level.sendParticles(ParticleTypes.ENCHANT, x, y + 0.15, z, 3, 0.22, 0.18, 0.22, 0.01);
+			}
+			if ((progressIndex % 14) == 0) {
+				level.playSound(null, targetPos, SoundEvents.ILLUSIONER_CAST_SPELL, SoundSource.BLOCKS, 0.35f, 1.55f);
+			}
+			if ((progressIndex % 48) == 0) {
+				level.sendParticles(ParticleTypes.EXPLOSION, x, y + 0.6, z, 1, 0.0, 0.0, 0.0, 0.0);
+				level.playSound(null, targetPos, SoundEvents.AMETHYST_BLOCK_RESONATE, SoundSource.BLOCKS, 0.55f, 1.8f);
+			}
 		}
 
 		private static boolean isTerrainOperation(int stage) {

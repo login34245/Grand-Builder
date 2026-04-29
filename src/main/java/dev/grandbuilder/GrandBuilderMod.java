@@ -1,6 +1,7 @@
 package dev.grandbuilder;
 
 import dev.grandbuilder.build.AnimatedBuildManager;
+import dev.grandbuilder.build.BuildEffectMode;
 import dev.grandbuilder.build.BuildSpeed;
 import dev.grandbuilder.build.CustomCaptureFormat;
 import dev.grandbuilder.build.StructureSelectionManager;
@@ -100,7 +101,8 @@ public class GrandBuilderMod implements ModInitializer {
 			AnimatedBuildManager.setSelection(
 				context.player().getUUID(),
 				payload.structureKey(),
-				BuildSpeed.byNetworkId(payload.speedId())
+				BuildSpeed.byNetworkId(payload.speedId()),
+				BuildEffectMode.byNetworkId(payload.effectModeId())
 			);
 			AnimatedBuildManager.preparePreview(context.player());
 		}));

@@ -1,6 +1,7 @@
 package dev.grandbuilder.client;
 
 import dev.grandbuilder.build.BuildSpeed;
+import dev.grandbuilder.build.BuildEffectMode;
 import dev.grandbuilder.build.CustomCaptureFormat;
 import dev.grandbuilder.build.StructureLibrary;
 import dev.grandbuilder.network.BuildControlAction;
@@ -35,16 +36,19 @@ public class BuilderMenuScreen extends Screen {
 
 	private static String lastStructureKey = StructureLibrary.defaultSelectionEntry().key();
 	private static BuildSpeed lastSpeed = BuildSpeed.NORMAL;
+	private static BuildEffectMode lastEffectMode = BuildEffectMode.STANDARD;
 	private static CustomCaptureFormat lastCaptureFormat = CustomCaptureFormat.SCHEM_SINGLE;
 
 	private List<StructureLibrary.SelectionEntry> structureChoices = new ArrayList<>();
 	private int selectedStructureIndex;
 	private BuildSpeed selectedSpeed = lastSpeed;
+	private BuildEffectMode selectedEffectMode = lastEffectMode;
 	private CustomCaptureFormat selectedCaptureFormat = lastCaptureFormat;
 	private Button structureButton;
 	private Button folderButton;
 	private Button speedButton;
 	private Button terrainButton;
+	private Button effectButton;
 	private Button captureFormatButton;
 	private Button startButton;
 	private Button captureButton;
@@ -75,6 +79,8 @@ public class BuilderMenuScreen extends Screen {
 		int structureButtonY,
 		int speedLabelY,
 		int speedButtonY,
+		int effectLabelY,
+		int effectButtonY,
 		int captureLabelY,
 		int captureButtonY,
 		int actionsButtonY,
@@ -137,6 +143,12 @@ public class BuilderMenuScreen extends Screen {
 			setFittedMessage(this.terrainButton, terrainMessage());
 			sendControl(BuildControlAction.TOGGLE_TERRAIN);
 		}).bounds(layout.innerLeft() + layout.splitLeft() + 4, layout.speedButtonY(), layout.splitRight(), layout.buttonHeight()).build());
+
+		this.effectButton = this.addRenderableWidget(Button.builder(fitButtonMessage(effectMessage(), layout.contentWidth()), button -> {
+			this.selectedEffectMode = this.selectedEffectMode.next();
+			lastEffectMode = this.selectedEffectMode;
+			setFittedMessage(this.effectButton, effectMessage());
+		}).bounds(layout.innerLeft(), layout.effectButtonY(), layout.contentWidth(), layout.buttonHeight()).build());
 
 		this.captureFormatButton = this.addRenderableWidget(Button.builder(fitButtonMessage(captureFormatMessage(), layout.contentWidth()), button -> {
 			this.selectedCaptureFormat = this.selectedCaptureFormat.next();
@@ -210,6 +222,9 @@ public class BuilderMenuScreen extends Screen {
 		int speedLabelY = y;
 		int speedButtonY = speedLabelY + labelStep;
 		y = speedButtonY + buttonHeight + rowGap;
+		int effectLabelY = y;
+		int effectButtonY = effectLabelY + labelStep;
+		y = effectButtonY + buttonHeight + rowGap;
 		int captureLabelY = y;
 		int captureButtonY = captureLabelY + labelStep;
 		y = captureButtonY + buttonHeight + groupGap;
@@ -266,6 +281,8 @@ public class BuilderMenuScreen extends Screen {
 			structureButtonY,
 			speedLabelY,
 			speedButtonY,
+			effectLabelY,
+			effectButtonY,
 			captureLabelY,
 			captureButtonY,
 			actionsButtonY,
@@ -324,8 +341,9 @@ public class BuilderMenuScreen extends Screen {
 		StructureLibrary.SelectionEntry selected = currentSelection();
 		lastStructureKey = selected.key();
 		lastSpeed = selectedSpeed;
+		lastEffectMode = selectedEffectMode;
 
-		ClientPlayNetworking.send(new BuildRequestPayload(selected.key(), selectedSpeed.networkId()));
+		ClientPlayNetworking.send(new BuildRequestPayload(selected.key(), selectedSpeed.networkId(), selectedEffectMode.networkId()));
 		PreviewConfirmState.arm();
 		this.onClose();
 	}
@@ -363,6 +381,13 @@ public class BuilderMenuScreen extends Screen {
 			this.terrainEnabled
 				? "screen.grand_builder.terrain_enabled"
 				: "screen.grand_builder.terrain_disabled"
+		);
+	}
+
+	private Component effectMessage() {
+		return Component.translatable(
+			"screen.grand_builder.effect_value",
+			Component.translatable(selectedEffectMode.translationKey())
 		);
 	}
 
@@ -445,6 +470,7 @@ public class BuilderMenuScreen extends Screen {
 		setFittedMessage(this.folderButton, Component.translatable("screen.grand_builder.open_structures"));
 		setFittedMessage(this.speedButton, speedMessage());
 		setFittedMessage(this.terrainButton, terrainMessage());
+		setFittedMessage(this.effectButton, effectMessage());
 		setFittedMessage(this.captureFormatButton, captureFormatMessage());
 		setFittedMessage(this.startButton, Component.translatable("screen.grand_builder.start"));
 		setFittedMessage(this.captureButton, Component.translatable("screen.grand_builder.capture"));
@@ -535,6 +561,7 @@ public class BuilderMenuScreen extends Screen {
 		}
 		drawFittedString(guiGraphics, Component.translatable("screen.grand_builder.structure"), layout.innerLeft() + 2, layout.structureLabelY(), layout.contentWidth(), 0xFFDBE9FF);
 		drawFittedString(guiGraphics, Component.translatable("screen.grand_builder.speed"), layout.innerLeft() + 2, layout.speedLabelY(), layout.contentWidth(), 0xFFDBE9FF);
+		drawFittedString(guiGraphics, Component.translatable("screen.grand_builder.effects"), layout.innerLeft() + 2, layout.effectLabelY(), layout.contentWidth(), 0xFFDBE9FF);
 		drawFittedString(guiGraphics, Component.translatable("screen.grand_builder.capture_format"), layout.innerLeft() + 2, layout.captureLabelY(), layout.contentWidth(), 0xFFDBE9FF);
 		renderLiveStatus(guiGraphics, layout);
 		BuildStatusClientState.Snapshot snapshot = BuildStatusClientState.snapshot();
