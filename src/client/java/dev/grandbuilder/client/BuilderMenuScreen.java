@@ -148,6 +148,7 @@ public class BuilderMenuScreen extends Screen {
 			this.selectedEffectMode = this.selectedEffectMode.next();
 			lastEffectMode = this.selectedEffectMode;
 			setFittedMessage(this.effectButton, effectMessage());
+			updateEffectDependentControls();
 		}).bounds(layout.innerLeft(), layout.effectButtonY(), layout.contentWidth(), layout.buttonHeight()).build());
 
 		this.captureFormatButton = this.addRenderableWidget(Button.builder(fitButtonMessage(captureFormatMessage(), layout.contentWidth()), button -> {
@@ -179,6 +180,7 @@ public class BuilderMenuScreen extends Screen {
 			fitButtonMessage(languageMessage(), layout.languageButtonWidth()),
 			button -> switchLanguage()
 		).bounds(layout.languageButtonLeft(), layout.languageButtonTop(), layout.languageButtonWidth(), YOUTUBE_BADGE_SIZE).build());
+		updateEffectDependentControls();
 
 		sendControl(BuildControlAction.STATUS_SILENT);
 		this.statusPollCooldown = 10;
@@ -340,7 +342,9 @@ public class BuilderMenuScreen extends Screen {
 	private void startBuild() {
 		StructureLibrary.SelectionEntry selected = currentSelection();
 		lastStructureKey = selected.key();
-		lastSpeed = selectedSpeed;
+		if (!isUfoMode()) {
+			lastSpeed = selectedSpeed;
+		}
 		lastEffectMode = selectedEffectMode;
 
 		ClientPlayNetworking.send(new BuildRequestPayload(selected.key(), selectedSpeed.networkId(), selectedEffectMode.networkId()));
@@ -389,6 +393,10 @@ public class BuilderMenuScreen extends Screen {
 			"screen.grand_builder.effect_value",
 			Component.translatable(selectedEffectMode.translationKey())
 		);
+	}
+
+	private boolean isUfoMode() {
+		return selectedEffectMode == BuildEffectMode.UFO_INVASION;
 	}
 
 	private Component languageMessage() {
@@ -481,6 +489,30 @@ public class BuilderMenuScreen extends Screen {
 		if (this.youtubeButton != null) {
 			this.youtubeButton.setMessage(Component.translatable("screen.grand_builder.youtube.badge"));
 		}
+		updateEffectDependentControls();
+	}
+
+	private void updateEffectDependentControls() {
+		UiLayout layout = layout();
+		boolean showSpeed = !isUfoMode();
+		if (this.speedButton != null) {
+			this.speedButton.visible = showSpeed;
+			this.speedButton.active = showSpeed;
+			this.speedButton.setX(layout.innerLeft());
+			this.speedButton.setY(layout.speedButtonY());
+			this.speedButton.setWidth(layout.splitLeft());
+			this.speedButton.setHeight(layout.buttonHeight());
+			setFittedMessage(this.speedButton, speedMessage());
+		}
+		if (this.terrainButton != null) {
+			int terrainX = showSpeed ? layout.innerLeft() + layout.splitLeft() + 4 : layout.innerLeft();
+			int terrainWidth = showSpeed ? layout.splitRight() : layout.contentWidth();
+			this.terrainButton.setX(terrainX);
+			this.terrainButton.setY(layout.speedButtonY());
+			this.terrainButton.setWidth(terrainWidth);
+			this.terrainButton.setHeight(layout.buttonHeight());
+			setFittedMessage(this.terrainButton, terrainMessage());
+		}
 	}
 
 	@Override
@@ -560,7 +592,9 @@ public class BuilderMenuScreen extends Screen {
 			drawCenteredFittedString(guiGraphics, Component.translatable("screen.grand_builder.subtitle"), panelCenterX, layout.subtitleY(), layout.contentWidth(), 0xFFB3D2F0);
 		}
 		drawFittedString(guiGraphics, Component.translatable("screen.grand_builder.structure"), layout.innerLeft() + 2, layout.structureLabelY(), layout.contentWidth(), 0xFFDBE9FF);
-		drawFittedString(guiGraphics, Component.translatable("screen.grand_builder.speed"), layout.innerLeft() + 2, layout.speedLabelY(), layout.contentWidth(), 0xFFDBE9FF);
+		if (!isUfoMode()) {
+			drawFittedString(guiGraphics, Component.translatable("screen.grand_builder.speed"), layout.innerLeft() + 2, layout.speedLabelY(), layout.contentWidth(), 0xFFDBE9FF);
+		}
 		drawFittedString(guiGraphics, Component.translatable("screen.grand_builder.effects"), layout.innerLeft() + 2, layout.effectLabelY(), layout.contentWidth(), 0xFFDBE9FF);
 		drawFittedString(guiGraphics, Component.translatable("screen.grand_builder.capture_format"), layout.innerLeft() + 2, layout.captureLabelY(), layout.contentWidth(), 0xFFDBE9FF);
 		renderLiveStatus(guiGraphics, layout);
@@ -752,12 +786,14 @@ public class BuilderMenuScreen extends Screen {
 			progressText,
 			snapshot.remainingBlocks()
 		);
-		Component etaLine = Component.translatable(
-			"screen.grand_builder.live_eta",
-			formatEtaTicks(snapshot.etaTicks()),
-			Component.translatable(speed.translationKey()),
-			speedRateText
-		);
+		Component etaLine = isUfoMode()
+			? Component.translatable("screen.grand_builder.live_eta_ufo", formatEtaTicks(snapshot.etaTicks()))
+			: Component.translatable(
+				"screen.grand_builder.live_eta",
+				formatEtaTicks(snapshot.etaTicks()),
+				Component.translatable(speed.translationKey()),
+				speedRateText
+			);
 
 		int x = layout.innerLeft() + 2;
 		int maxWidth = layout.contentWidth();
