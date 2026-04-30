@@ -342,7 +342,7 @@ public class BuilderMenuScreen extends Screen {
 	private void startBuild() {
 		StructureLibrary.SelectionEntry selected = currentSelection();
 		lastStructureKey = selected.key();
-		if (!isUfoMode()) {
+		if (!selectedEffectMode.hidesSpeed()) {
 			lastSpeed = selectedSpeed;
 		}
 		lastEffectMode = selectedEffectMode;
@@ -393,10 +393,6 @@ public class BuilderMenuScreen extends Screen {
 			"screen.grand_builder.effect_value",
 			Component.translatable(selectedEffectMode.translationKey())
 		);
-	}
-
-	private boolean isUfoMode() {
-		return selectedEffectMode == BuildEffectMode.UFO_INVASION;
 	}
 
 	private Component languageMessage() {
@@ -494,7 +490,7 @@ public class BuilderMenuScreen extends Screen {
 
 	private void updateEffectDependentControls() {
 		UiLayout layout = layout();
-		boolean showSpeed = !isUfoMode();
+		boolean showSpeed = !selectedEffectMode.hidesSpeed();
 		if (this.speedButton != null) {
 			this.speedButton.visible = showSpeed;
 			this.speedButton.active = showSpeed;
@@ -592,7 +588,7 @@ public class BuilderMenuScreen extends Screen {
 			drawCenteredFittedString(guiGraphics, Component.translatable("screen.grand_builder.subtitle"), panelCenterX, layout.subtitleY(), layout.contentWidth(), 0xFFB3D2F0);
 		}
 		drawFittedString(guiGraphics, Component.translatable("screen.grand_builder.structure"), layout.innerLeft() + 2, layout.structureLabelY(), layout.contentWidth(), 0xFFDBE9FF);
-		if (!isUfoMode()) {
+		if (!selectedEffectMode.hidesSpeed()) {
 			drawFittedString(guiGraphics, Component.translatable("screen.grand_builder.speed"), layout.innerLeft() + 2, layout.speedLabelY(), layout.contentWidth(), 0xFFDBE9FF);
 		}
 		drawFittedString(guiGraphics, Component.translatable("screen.grand_builder.effects"), layout.innerLeft() + 2, layout.effectLabelY(), layout.contentWidth(), 0xFFDBE9FF);
@@ -786,8 +782,8 @@ public class BuilderMenuScreen extends Screen {
 			progressText,
 			snapshot.remainingBlocks()
 		);
-		Component etaLine = isUfoMode()
-			? Component.translatable("screen.grand_builder.live_eta_ufo", formatEtaTicks(snapshot.etaTicks()))
+		Component etaLine = selectedEffectMode.hidesSpeed()
+			? Component.translatable("screen.grand_builder.live_eta_scene", formatEtaTicks(snapshot.etaTicks()))
 			: Component.translatable(
 				"screen.grand_builder.live_eta",
 				formatEtaTicks(snapshot.etaTicks()),

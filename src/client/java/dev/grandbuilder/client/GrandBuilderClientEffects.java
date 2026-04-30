@@ -1,5 +1,6 @@
 package dev.grandbuilder.client;
 
+import dev.grandbuilder.build.BuildEffectMode;
 import dev.grandbuilder.network.BuildEffectPayload;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
@@ -10,6 +11,7 @@ public final class GrandBuilderClientEffects {
 	private static int totalTicks;
 	private static int ticksLeft;
 	private static int ageTicks;
+	private static int effectModeId;
 	private static int phaseId;
 	private static float intensity;
 	private static float lastYawOffset;
@@ -22,6 +24,7 @@ public final class GrandBuilderClientEffects {
 		totalTicks = Math.max(1, payload.durationTicks());
 		ticksLeft = totalTicks;
 		ageTicks = 0;
+		effectModeId = payload.effectModeId();
 		phaseId = payload.phaseId();
 		intensity = Math.max(0.1f, payload.intensity());
 		lastYawOffset = 0.0f;
@@ -55,6 +58,7 @@ public final class GrandBuilderClientEffects {
 		float age = ageTicks + partialTick;
 		float remaining = clamp(ticksLeft / (float) Math.max(1, totalTicks), 0.0f, 1.0f);
 		float revealBoost = phaseId == BuildEffectPayload.PHASE_REVEAL ? 1.45f : 1.0f;
+		BuildEffectMode mode = BuildEffectMode.byNetworkId(effectModeId);
 		float wave = 0.5f + 0.5f * (float) Math.sin(age * 0.85f);
 		float flicker = 0.5f + 0.5f * (float) Math.sin(age * 2.70f);
 		float power = clamp((0.24f + wave * 0.42f + flicker * 0.18f) * intensity * revealBoost * remaining, 0.0f, 1.0f);
@@ -62,19 +66,29 @@ public final class GrandBuilderClientEffects {
 		int height = graphics.guiHeight();
 		int shakeX = Math.round((float) Math.sin(age * 2.15f) * 5.0f * intensity * remaining * revealBoost);
 		int shakeY = Math.round((float) Math.cos(age * 2.85f) * 3.0f * intensity * remaining * revealBoost);
-		int topColor = argb(Math.round(90.0f * power), 95, 255, 238);
-		int bottomColor = argb(Math.round(120.0f * power), 190, 65, 255);
+		int topColor = overlayTopColor(mode, power);
+		int bottomColor = overlayBottomColor(mode, power);
 		int flashAlpha = Math.round((phaseId == BuildEffectPayload.PHASE_REVEAL ? 130.0f : 55.0f) * power);
 
 		graphics.pose().pushMatrix();
 		graphics.pose().translate(shakeX, shakeY);
 		graphics.fillGradient(-16, -16, width + 16, height + 16, topColor, bottomColor);
-		graphics.fill(0, 0, width, height, argb(flashAlpha, 245, 255, 255));
+		graphics.fill(0, 0, width, height, argb(flashAlpha, flashRed(mode), flashGreen(mode), flashBlue(mode)));
 
 		int beamWidth = Math.max(28, width / 11);
 		int centerX = width / 2 + Math.round((float) Math.sin(age * 0.45f) * width * 0.06f);
-		graphics.fill(centerX - beamWidth, 0, centerX + beamWidth, height, argb(Math.round(90.0f * power), 115, 255, 230));
-		graphics.fill(centerX - beamWidth / 3, 0, centerX + beamWidth / 3, height, argb(Math.round(115.0f * power), 255, 255, 255));
+		if (mode == BuildEffectMode.METEOR_FORGE) {
+			int impactY = Math.min(height - 8, Math.round(height * (0.22f + (1.0f - remaining) * 0.58f)));
+			graphics.fill(0, impactY - beamWidth / 3, width, impactY + beamWidth / 3, argb(Math.round(118.0f * power), 255, 126, 34));
+			graphics.fill(0, impactY - 2, width, impactY + 2, argb(Math.round(155.0f * power), 255, 245, 190));
+		} else if (mode == BuildEffectMode.RIFT_BLOOM) {
+			int crackWidth = Math.max(14, width / 22);
+			graphics.fill(centerX - crackWidth * 2, 0, centerX + crackWidth * 2, height, argb(Math.round(78.0f * power), 88, 28, 132));
+			graphics.fill(centerX - crackWidth / 2, 0, centerX + crackWidth / 2, height, argb(Math.round(136.0f * power), 238, 82, 255));
+		} else {
+			graphics.fill(centerX - beamWidth, 0, centerX + beamWidth, height, argb(Math.round(90.0f * power), 115, 255, 230));
+			graphics.fill(centerX - beamWidth / 3, 0, centerX + beamWidth / 3, height, argb(Math.round(115.0f * power), 255, 255, 255));
+		}
 
 		int scanAlpha = Math.round(56.0f * power);
 		for (int y = -8; y < height + 16; y += 13) {
@@ -114,6 +128,7 @@ public final class GrandBuilderClientEffects {
 		ticksLeft = 0;
 		ageTicks = 0;
 		phaseId = 0;
+		effectModeId = 0;
 		intensity = 0.0f;
 		lastYawOffset = 0.0f;
 		lastPitchOffset = 0.0f;
@@ -121,6 +136,34 @@ public final class GrandBuilderClientEffects {
 
 	private static int argb(int alpha, int red, int green, int blue) {
 		return (clamp(alpha, 0, 255) << 24) | (clamp(red, 0, 255) << 16) | (clamp(green, 0, 255) << 8) | clamp(blue, 0, 255);
+	}
+
+	private static int overlayTopColor(BuildEffectMode mode, float power) {
+		return switch (mode) {
+			case RIFT_BLOOM -> argb(Math.round(105.0f * power), 74, 16, 110);
+			case METEOR_FORGE -> argb(Math.round(100.0f * power), 255, 105, 32);
+			default -> argb(Math.round(90.0f * power), 95, 255, 238);
+		};
+	}
+
+	private static int overlayBottomColor(BuildEffectMode mode, float power) {
+		return switch (mode) {
+			case RIFT_BLOOM -> argb(Math.round(132.0f * power), 206, 54, 255);
+			case METEOR_FORGE -> argb(Math.round(132.0f * power), 82, 18, 8);
+			default -> argb(Math.round(120.0f * power), 190, 65, 255);
+		};
+	}
+
+	private static int flashRed(BuildEffectMode mode) {
+		return mode == BuildEffectMode.METEOR_FORGE ? 255 : 245;
+	}
+
+	private static int flashGreen(BuildEffectMode mode) {
+		return mode == BuildEffectMode.RIFT_BLOOM ? 180 : mode == BuildEffectMode.METEOR_FORGE ? 210 : 255;
+	}
+
+	private static int flashBlue(BuildEffectMode mode) {
+		return mode == BuildEffectMode.METEOR_FORGE ? 120 : 255;
 	}
 
 	private static int clamp(int value, int min, int max) {
