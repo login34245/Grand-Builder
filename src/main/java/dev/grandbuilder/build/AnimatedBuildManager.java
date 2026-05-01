@@ -53,6 +53,9 @@ public final class AnimatedBuildManager {
 	private static final int TERRAIN_FILL_STAGE_BASE = 2_000_000;
 	private static final int TERRAIN_CLEAR_STAGE_BASE = 2_100_000;
 	private static final int VEGETATION_CLEAR_STAGE_BASE = 2_200_000;
+	private static final int CLOCKWORK_BUILD_DURATION_TICKS = 20 * 12;
+	private static final long MINECRAFT_DAY_TICKS = 24_000L;
+	private static final double CLOCKWORK_DAY_NIGHT_CYCLES = 6.0;
 	private static final Comparator<GrandPalaceBlueprint.RelativeBlock> BLOCK_BUILD_ORDER = Comparator
 		.comparingInt(GrandPalaceBlueprint.RelativeBlock::stage)
 		.thenComparingInt(GrandPalaceBlueprint.RelativeBlock::y)
@@ -136,9 +139,7 @@ public final class AnimatedBuildManager {
 		PENDING_PREVIEW_BY_PLAYER.put(player.getUUID(), preview);
 
 		BuildSpeed speed = getSpeed(player.getUUID());
-		long ticksLeft = preview.effectMode().instantReveal()
-			? preview.effectMode().revealDelayTicks()
-			: estimateTicks(preview.totalBlocks(), speed);
+		long ticksLeft = estimateTicks(preview.totalBlocks(), speed, preview.effectMode());
 		player.displayClientMessage(Component.translatable(
 			"message.grand_builder.preview_ready",
 			selection.structure().displayName(),
@@ -212,6 +213,13 @@ public final class AnimatedBuildManager {
 				"message.grand_builder.started_effect",
 				preview.structureName(),
 				Component.translatable(preview.effectMode().translationKey())
+			), true);
+		} else if (preview.effectMode() == BuildEffectMode.CLOCKWORK_GRID) {
+			player.displayClientMessage(Component.translatable(
+				"message.grand_builder.started_clockwork",
+				preview.structureName(),
+				Component.translatable(preview.effectMode().translationKey()),
+				formatDurationTicks(CLOCKWORK_BUILD_DURATION_TICKS)
 			), true);
 		} else {
 			player.displayClientMessage(Component.translatable("message.grand_builder.started", preview.structureName(), speed.displayRate()), true);
@@ -508,9 +516,7 @@ public final class AnimatedBuildManager {
 
 		PendingPreview preview = PENDING_PREVIEW_BY_PLAYER.get(player.getUUID());
 		if (preview != null) {
-			long ticksLeft = preview.effectMode().instantReveal()
-				? preview.effectMode().revealDelayTicks()
-				: estimateTicks(preview.totalBlocks(), speed);
+			long ticksLeft = estimateTicks(preview.totalBlocks(), speed, preview.effectMode());
 			sendStatusPayload(
 				player,
 				2,
@@ -679,6 +685,7 @@ public final class AnimatedBuildManager {
 			ServerPlayer owner = server.getPlayerList().getPlayer(job.ownerId);
 			if (config.pauseWhenOwnerOffline && owner == null) {
 				job.pausedByOffline = true;
+				job.restoreClockworkTime(level);
 				continue;
 			}
 			if (owner != null && job.pausedByOffline) {
@@ -1526,6 +1533,26 @@ public final class AnimatedBuildManager {
 		return Math.max(1L, (long) Math.ceil(ticks));
 	}
 
+	private static long estimateTicks(int remainingBlocks, BuildSpeed speed, BuildEffectMode effectMode) {
+		if (remainingBlocks <= 0) {
+			return 0L;
+		}
+		if (effectMode.instantReveal()) {
+			return effectMode.revealDelayTicks();
+		}
+		if (effectMode == BuildEffectMode.CLOCKWORK_GRID) {
+			return CLOCKWORK_BUILD_DURATION_TICKS;
+		}
+		return estimateTicks(remainingBlocks, speed);
+	}
+
+	private static double smoothClockworkCycles(double cycles) {
+		double fullCycles = Math.floor(cycles);
+		double phase = cycles - fullCycles;
+		double smoothPhase = phase * phase * (3.0 - 2.0 * phase);
+		return fullCycles + smoothPhase;
+	}
+
 	private static void sendStatusPayload(
 		ServerPlayer player,
 		int modeId,
@@ -2015,6 +2042,7 @@ public final class AnimatedBuildManager {
 		private int skippedBlocks;
 		private long clockworkOriginalDayTime = Long.MIN_VALUE;
 		private long clockworkElapsedTicks;
+		private long clockworkWarpSessionTicks;
 		private boolean waitingForChunks;
 		private boolean instantRevealPlacement;
 
@@ -2059,7 +2087,7 @@ public final class AnimatedBuildManager {
 				return tickInstantReveal(level, owner, config);
 			}
 			if (effectMode == BuildEffectMode.CLOCKWORK_GRID) {
-				tickClockworkTimeWarp(level);
+				return tickClockworkBuild(level, config);
 			}
 			tickBuildEffect(level);
 			tickDelayCounter++;
@@ -2070,8 +2098,41 @@ public final class AnimatedBuildManager {
 			tickDelayCounter = 0;
 
 			int attemptsBudget = Math.min(config.maxBlocksPerTick, Math.max(1, speed.blocksPerCycle()));
-			waitingForChunks = false;
+			placeBudgetedBlocks(level, attemptsBudget, config);
+			return dryCursor >= dryBlocks.size() && fluidCursor >= fluidBlocks.size();
+		}
 
+		private boolean tickClockworkBuild(ServerLevel level, GrandBuilderConfig config) {
+			tickClockworkTimeWarp(level);
+			tickBuildEffect(level);
+
+			int targetPlaced = targetClockworkPlacedBlocks();
+			int attemptsBudget = Math.max(0, targetPlaced - placedBlocks());
+			if (clockworkElapsedTicks >= CLOCKWORK_BUILD_DURATION_TICKS) {
+				attemptsBudget = Math.max(attemptsBudget, remainingBlocks());
+			}
+			if (attemptsBudget <= 0) {
+				waitingForChunks = false;
+				return false;
+			}
+
+			placeBudgetedBlocks(level, attemptsBudget, config);
+			return dryCursor >= dryBlocks.size() && fluidCursor >= fluidBlocks.size();
+		}
+
+		private int targetClockworkPlacedBlocks() {
+			if (totalBlocks <= 0) {
+				return 0;
+			}
+			if (clockworkElapsedTicks >= CLOCKWORK_BUILD_DURATION_TICKS) {
+				return totalBlocks;
+			}
+			double progress = clockworkElapsedTicks / (double) CLOCKWORK_BUILD_DURATION_TICKS;
+			return Math.min(totalBlocks, (int) Math.floor(totalBlocks * progress));
+		}
+
+		private void placeBudgetedBlocks(ServerLevel level, int attemptsBudget, GrandBuilderConfig config) {
+			waitingForChunks = false;
 			for (int attempts = 0; attempts < attemptsBudget; attempts++) {
 				if (dryCursor < dryBlocks.size()) {
 					PlacementResult result = placeBlock(level, dryBlocks.get(dryCursor), dryCursor + 1, config);
@@ -2100,29 +2161,28 @@ public final class AnimatedBuildManager {
 				}
 				break;
 			}
-			return dryCursor >= dryBlocks.size() && fluidCursor >= fluidBlocks.size();
 		}
 
 		private void tickClockworkTimeWarp(ServerLevel level) {
 			if (clockworkOriginalDayTime == Long.MIN_VALUE) {
 				clockworkOriginalDayTime = level.getDayTime();
-				clockworkElapsedTicks = 0L;
+				clockworkWarpSessionTicks = 0L;
 			}
 
-			clockworkElapsedTicks++;
-			long naturalTime = clockworkOriginalDayTime + clockworkElapsedTicks;
-			long dayBase = Math.floorDiv(naturalTime, 24000L) * 24000L;
-			long warpedCycle = Math.floorMod(clockworkOriginalDayTime + clockworkElapsedTicks * 850L, 24000L);
-			level.setDayTime(dayBase + warpedCycle);
+			clockworkElapsedTicks = Math.min(CLOCKWORK_BUILD_DURATION_TICKS, clockworkElapsedTicks + 1L);
+			clockworkWarpSessionTicks++;
+			double cycles = (clockworkWarpSessionTicks / (double) CLOCKWORK_BUILD_DURATION_TICKS) * CLOCKWORK_DAY_NIGHT_CYCLES;
+			long warpedOffset = Math.round(smoothClockworkCycles(cycles) * MINECRAFT_DAY_TICKS);
+			level.setDayTime(clockworkOriginalDayTime + warpedOffset);
 		}
 
 		private void restoreClockworkTime(ServerLevel level) {
 			if (clockworkOriginalDayTime == Long.MIN_VALUE) {
 				return;
 			}
-			level.setDayTime(clockworkOriginalDayTime + clockworkElapsedTicks);
+			level.setDayTime(clockworkOriginalDayTime + clockworkWarpSessionTicks);
 			clockworkOriginalDayTime = Long.MIN_VALUE;
-			clockworkElapsedTicks = 0L;
+			clockworkWarpSessionTicks = 0L;
 		}
 
 		private boolean tickInstantReveal(ServerLevel level, ServerPlayer owner, GrandBuilderConfig config) {
@@ -2902,6 +2962,12 @@ public final class AnimatedBuildManager {
 		private long estimateTicksLeft(BuildSpeed speed) {
 			if (effectMode.instantReveal() && placedBlocks() <= 0) {
 				return Math.max(1L, effectMode.revealDelayTicks() - effectTick);
+			}
+			if (effectMode == BuildEffectMode.CLOCKWORK_GRID) {
+				if (remainingBlocks() <= 0) {
+					return 0L;
+				}
+				return Math.max(1L, CLOCKWORK_BUILD_DURATION_TICKS - clockworkElapsedTicks);
 			}
 			return estimateTicks(remainingBlocks(), speed);
 		}

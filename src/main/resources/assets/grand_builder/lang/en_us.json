@@ -74,6 +74,7 @@
   "message.grand_builder.custom_missing": "Capture your custom structure first from the Builder Console.",
   "message.grand_builder.started": "%s started. Speed: %s blocks/tick.",
   "message.grand_builder.started_effect": "%s started with %s. The structure will reveal in one staged pulse.",
+  "message.grand_builder.started_clockwork": "%s started with %s. Duration: %s.",
   "message.grand_builder.started_ufo": "%s: UFO arrival started. The structure will reveal in one pulse.",
   "message.grand_builder.completed": "%s completed.",
   "message.grand_builder.completed_with_skips": "Skipped %s blocked/unavailable positions.",

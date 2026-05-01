@@ -23,7 +23,7 @@ public enum BuildEffectMode {
 	}
 
 	public boolean hidesSpeed() {
-		return instantReveal;
+		return instantReveal || this == CLOCKWORK_GRID;
 	}
 
 	public boolean instantReveal() {
