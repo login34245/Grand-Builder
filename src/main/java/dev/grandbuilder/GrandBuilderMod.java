@@ -35,6 +35,7 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.permissions.Permissions;
+import net.minecraft.sounds.SoundEvent;
 import net.minecraft.world.item.CreativeModeTab;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -47,9 +48,11 @@ public class GrandBuilderMod implements ModInitializer {
 	public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 	public static final Identifier STRUCTURE_CORE_ID = id("structure_core");
 	public static final Identifier STRUCTURE_SELECTOR_ID = id("structure_selector");
+	public static final Identifier CLOCK_TICK_ID = id("effect.clock_tick");
 	public static final ResourceKey<Item> STRUCTURE_CORE_KEY = ResourceKey.create(Registries.ITEM, STRUCTURE_CORE_ID);
 	public static final ResourceKey<Item> STRUCTURE_SELECTOR_KEY = ResourceKey.create(Registries.ITEM, STRUCTURE_SELECTOR_ID);
 	public static final ResourceKey<CreativeModeTab> CREATIVE_TAB_KEY = ResourceKey.create(Registries.CREATIVE_MODE_TAB, id("tab"));
+	public static final SoundEvent CLOCK_TICK = SoundEvent.createVariableRangeEvent(CLOCK_TICK_ID);
 
 	public static final Item STRUCTURE_CORE = new StructureCoreItem(new Item.Properties()
 		.setId(STRUCTURE_CORE_KEY)
@@ -66,6 +69,7 @@ public class GrandBuilderMod implements ModInitializer {
 
 		Registry.register(BuiltInRegistries.ITEM, STRUCTURE_CORE_ID, STRUCTURE_CORE);
 		Registry.register(BuiltInRegistries.ITEM, STRUCTURE_SELECTOR_ID, STRUCTURE_SELECTOR);
+		Registry.register(BuiltInRegistries.SOUND_EVENT, CLOCK_TICK_ID, CLOCK_TICK);
 		Registry.register(BuiltInRegistries.CREATIVE_MODE_TAB, CREATIVE_TAB_KEY, FabricItemGroup.builder()
 			.title(Component.translatable("itemGroup.grand_builder.main"))
 			.icon(() -> new ItemStack(STRUCTURE_CORE))

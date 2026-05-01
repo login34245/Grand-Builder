@@ -1,0 +1,12 @@
+{
+  "effect.clock_tick": {
+    "subtitle": "subtitles.grand_builder.clock_tick",
+    "sounds": [
+      {
+        "name": "grand_builder:effects/clock_tick",
+        "volume": 1.0,
+        "pitch": 1.0
+      }
+    ]
+  }
+}

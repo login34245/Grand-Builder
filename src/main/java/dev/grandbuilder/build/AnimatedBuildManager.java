@@ -635,6 +635,9 @@ public final class AnimatedBuildManager {
 			player.displayClientMessage(Component.translatable("message.grand_builder.rollback_missing"), true);
 			return;
 		}
+		if (activeJob != null) {
+			activeJob.restoreClockworkTime(level);
+		}
 
 		int restored = 0;
 		int skipped = 0;
@@ -693,6 +696,7 @@ public final class AnimatedBuildManager {
 
 			if (finished) {
 				job.finishEffects(level);
+				job.restoreClockworkTime(level);
 				if (owner != null) {
 					owner.displayClientMessage(Component.translatable("message.grand_builder.completed", job.structureName), true);
 					if (job.skippedBlocks > 0) {
@@ -2009,6 +2013,8 @@ public final class AnimatedBuildManager {
 		private int effectTick;
 		private int statusPulse;
 		private int skippedBlocks;
+		private long clockworkOriginalDayTime = Long.MIN_VALUE;
+		private long clockworkElapsedTicks;
 		private boolean waitingForChunks;
 		private boolean instantRevealPlacement;
 
@@ -2045,11 +2051,15 @@ public final class AnimatedBuildManager {
 
 		private boolean tick(ServerLevel level, ServerPlayer owner, BuildSpeed speed, GrandBuilderConfig config) {
 			if (paused || pausedByOffline) {
+				restoreClockworkTime(level);
 				waitingForChunks = false;
 				return false;
 			}
 			if (effectMode.instantReveal()) {
 				return tickInstantReveal(level, owner, config);
+			}
+			if (effectMode == BuildEffectMode.CLOCKWORK_GRID) {
+				tickClockworkTimeWarp(level);
 			}
 			tickBuildEffect(level);
 			tickDelayCounter++;
@@ -2091,6 +2101,28 @@ public final class AnimatedBuildManager {
 				break;
 			}
 			return dryCursor >= dryBlocks.size() && fluidCursor >= fluidBlocks.size();
+		}
+
+		private void tickClockworkTimeWarp(ServerLevel level) {
+			if (clockworkOriginalDayTime == Long.MIN_VALUE) {
+				clockworkOriginalDayTime = level.getDayTime();
+				clockworkElapsedTicks = 0L;
+			}
+
+			clockworkElapsedTicks++;
+			long naturalTime = clockworkOriginalDayTime + clockworkElapsedTicks;
+			long dayBase = Math.floorDiv(naturalTime, 24000L) * 24000L;
+			long warpedCycle = Math.floorMod(clockworkOriginalDayTime + clockworkElapsedTicks * 850L, 24000L);
+			level.setDayTime(dayBase + warpedCycle);
+		}
+
+		private void restoreClockworkTime(ServerLevel level) {
+			if (clockworkOriginalDayTime == Long.MIN_VALUE) {
+				return;
+			}
+			level.setDayTime(clockworkOriginalDayTime + clockworkElapsedTicks);
+			clockworkOriginalDayTime = Long.MIN_VALUE;
+			clockworkElapsedTicks = 0L;
 		}
 
 		private boolean tickInstantReveal(ServerLevel level, ServerPlayer owner, GrandBuilderConfig config) {
@@ -2455,6 +2487,25 @@ public final class AnimatedBuildManager {
 			double centerY = Math.min(level.getMaxY() - 2.0, effectBounds.maxY() + 2.0);
 			double centerZ = (effectBounds.minZ() + effectBounds.maxZ()) * 0.5 + 0.5;
 			double baseRadius = Math.max(2.8, Math.min(14.0, Math.max(effectBounds.maxX() - effectBounds.minX() + 1.0, effectBounds.maxZ() - effectBounds.minZ() + 1.0) * 0.45));
+			double dialY = centerY + 0.35;
+			int hourMarks = 12;
+			for (int mark = 0; mark < hourMarks; mark++) {
+				double angle = (Math.PI * 2.0 * mark) / hourMarks;
+				double outer = baseRadius + 4.0;
+				double inner = outer - (mark % 3 == 0 ? 1.3 : 0.7);
+				spawnEdgeLine(
+					level,
+					mark % 3 == 0 ? ParticleTypes.END_ROD : ParticleTypes.ELECTRIC_SPARK,
+					centerX + Math.cos(angle) * inner,
+					dialY,
+					centerZ + Math.sin(angle) * inner,
+					centerX + Math.cos(angle) * outer,
+					dialY,
+					centerZ + Math.sin(angle) * outer,
+					mark % 3 == 0 ? 4 : 2
+				);
+			}
+
 			for (int gear = 0; gear < 3; gear++) {
 				int teeth = 18 + gear * 8;
 				double radius = baseRadius + gear * 1.45;
@@ -2469,6 +2520,11 @@ public final class AnimatedBuildManager {
 				}
 			}
 
+			double minuteAngle = effectTick * 0.52;
+			double hourAngle = effectTick * 0.145 + Math.PI * 0.35;
+			spawnEdgeLine(level, ParticleTypes.END_ROD, centerX, dialY, centerZ, centerX + Math.cos(minuteAngle) * (baseRadius + 3.5), dialY, centerZ + Math.sin(minuteAngle) * (baseRadius + 3.5), 14);
+			spawnEdgeLine(level, ParticleTypes.CRIT, centerX, dialY + 0.06, centerZ, centerX + Math.cos(hourAngle) * (baseRadius + 1.6), dialY + 0.06, centerZ + Math.sin(hourAngle) * (baseRadius + 1.6), 10);
+
 			int scanCount = 9;
 			for (int i = 0; i < scanCount; i++) {
 				double t = Math.floorMod(effectTick + i * 5, 36) / 35.0;
@@ -2476,6 +2532,34 @@ public final class AnimatedBuildManager {
 				spawnEdgeLine(level, ParticleTypes.END_ROD, effectBounds.minX() + 0.5, y, effectBounds.minZ() + 0.5, effectBounds.maxX() + 0.5, y, effectBounds.maxZ() + 0.5, 9);
 			}
 
+			for (int i = 0; i < 16; i++) {
+				double phase = effectTick * 0.42 + i * 0.87;
+				double radius = baseRadius * (0.36 + (i % 5) * 0.09);
+				double y = effectBounds.minY() + 0.8 + Math.floorMod(effectTick * 2 + i * 7, Math.max(2, effectBounds.maxY() - effectBounds.minY() + 3));
+				double x = centerX + Math.cos(phase) * radius;
+				double z = centerZ + Math.sin(phase * 1.13) * radius;
+				level.sendParticles(i % 4 == 0 ? ParticleTypes.TRIAL_SPAWNER_DETECTED_PLAYER_OMINOUS : ParticleTypes.ELECTRIC_SPARK, x, y, z, 1, 0.08, 0.08, 0.08, 0.0);
+			}
+
+			long cycle = Math.floorMod(level.getDayTime(), 24000L);
+			boolean nightSlice = cycle >= 12000L;
+			if ((effectTick % 6) == 0) {
+				level.sendParticles(
+					nightSlice ? ParticleTypes.REVERSE_PORTAL : ParticleTypes.FIREWORK,
+					centerX,
+					effectBounds.maxY() + 2.0,
+					centerZ,
+					nightSlice ? 18 : 2,
+					baseRadius * 0.38,
+					1.1,
+					baseRadius * 0.38,
+					nightSlice ? 0.06 : 0.0
+				);
+			}
+			if ((effectTick % 4) == 0) {
+				float pitch = (effectTick % 8) == 0 ? 0.92f : 1.18f;
+				level.playSound(null, BlockPos.containing(centerX, centerY, centerZ), GrandBuilderMod.CLOCK_TICK, SoundSource.BLOCKS, 0.82f, pitch);
+			}
 			if ((effectTick % 28) == 1) {
 				level.playSound(null, BlockPos.containing(centerX, centerY, centerZ), SoundEvents.COPPER_BULB_TURN_ON, SoundSource.BLOCKS, 0.35f, 1.25f);
 			}
