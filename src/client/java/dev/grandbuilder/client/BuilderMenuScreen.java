@@ -27,11 +27,7 @@ public class BuilderMenuScreen extends Screen {
 	private static final int MIN_PANEL_HEIGHT = 190;
 	private static final int SCREEN_MARGIN = 6;
 	private static final int YOUTUBE_BADGE_SIZE = 18;
-	private static final int LANGUAGE_BUTTON_WIDTH = 64;
-	private static final String ENGLISH_LANGUAGE = "en_us";
-	private static final String RUSSIAN_LANGUAGE = "ru_ru";
 	private static final int YOUTUBE_TOOLTIP_MAX_WIDTH = 220;
-	private static final int LANGUAGE_TOOLTIP_MAX_WIDTH = 180;
 	private static final int STRUCTURES_TOOLTIP_MAX_WIDTH = 260;
 
 	private static String lastStructureKey = StructureLibrary.defaultSelectionEntry().key();
@@ -56,7 +52,6 @@ public class BuilderMenuScreen extends Screen {
 	private Button rollbackButton;
 	private Button cancelPreviewButton;
 	private Button youtubeButton;
-	private Button languageButton;
 	private boolean terrainEnabled = true;
 	private int statusPollCooldown = 0;
 	private int knownStructureListRevision = -1;
@@ -99,9 +94,6 @@ public class BuilderMenuScreen extends Screen {
 		int splitLeft,
 		int splitRight,
 		int halfWidth,
-		int languageButtonLeft,
-		int languageButtonTop,
-		int languageButtonWidth,
 		int youtubeButtonLeft,
 		int youtubeButtonTop,
 		boolean showSubtitle,
@@ -176,10 +168,6 @@ public class BuilderMenuScreen extends Screen {
 			Component.translatable("screen.grand_builder.youtube.badge"),
 			button -> openYoutubeChannel()
 		).bounds(youtubeBadgeLeft, youtubeBadgeTop, YOUTUBE_BADGE_SIZE, YOUTUBE_BADGE_SIZE).build());
-		this.languageButton = this.addRenderableWidget(Button.builder(
-			fitButtonMessage(languageMessage(), layout.languageButtonWidth()),
-			button -> switchLanguage()
-		).bounds(layout.languageButtonLeft(), layout.languageButtonTop(), layout.languageButtonWidth(), YOUTUBE_BADGE_SIZE).build());
 		updateEffectDependentControls();
 
 		sendControl(BuildControlAction.STATUS_SILENT);
@@ -262,9 +250,7 @@ public class BuilderMenuScreen extends Screen {
 		if (contentWidth - halfWidth - 4 < 42) {
 			halfWidth = Math.max(42, contentWidth - 46);
 		}
-		int languageButtonWidth = Math.min(LANGUAGE_BUTTON_WIDTH, Math.max(48, contentWidth / 3));
 		int youtubeButtonLeft = innerRight - YOUTUBE_BADGE_SIZE;
-		int languageButtonLeft = Math.max(innerLeft, youtubeButtonLeft - 4 - languageButtonWidth);
 		int headerButtonTop = top + (veryCompact ? 4 : 8);
 
 		return new UiLayout(
@@ -303,9 +289,6 @@ public class BuilderMenuScreen extends Screen {
 			splitLeft,
 			splitRight,
 			halfWidth,
-			languageButtonLeft,
-			headerButtonTop,
-			languageButtonWidth,
 			youtubeButtonLeft,
 			headerButtonTop,
 			showSubtitle,
@@ -395,10 +378,6 @@ public class BuilderMenuScreen extends Screen {
 		);
 	}
 
-	private Component languageMessage() {
-		return Component.translatable("screen.grand_builder.language_value", languageDisplayCode(currentLanguageCode()));
-	}
-
 	private Component fitButtonMessage(Component message, int buttonWidth) {
 		return fitText(message, Math.max(8, buttonWidth - 12));
 	}
@@ -427,48 +406,6 @@ public class BuilderMenuScreen extends Screen {
 		}
 	}
 
-	private String currentLanguageCode() {
-		if (this.minecraft == null) {
-			return ENGLISH_LANGUAGE;
-		}
-		return this.minecraft.options.languageCode;
-	}
-
-	private String languageDisplayCode(String languageCode) {
-		if (RUSSIAN_LANGUAGE.equals(languageCode)) {
-			return "RU";
-		}
-		if (ENGLISH_LANGUAGE.equals(languageCode)) {
-			return "EN";
-		}
-		return languageCode.toUpperCase(Locale.ROOT);
-	}
-
-	private void switchLanguage() {
-		if (this.minecraft == null) {
-			return;
-		}
-
-		String nextLanguage = RUSSIAN_LANGUAGE.equals(currentLanguageCode())
-			? ENGLISH_LANGUAGE
-			: RUSSIAN_LANGUAGE;
-		this.minecraft.getLanguageManager().setSelected(nextLanguage);
-		this.minecraft.options.languageCode = nextLanguage;
-		this.minecraft.options.save();
-		refreshButtonMessages();
-		this.minecraft.reloadResourcePacks().thenRun(() -> {
-			if (this.minecraft != null) {
-				this.minecraft.execute(this::refreshButtonMessages);
-			}
-		});
-		if (this.minecraft.player != null) {
-			this.minecraft.player.displayClientMessage(
-				Component.translatable("screen.grand_builder.language_changed", languageDisplayCode(nextLanguage)),
-				true
-			);
-		}
-	}
-
 	private void refreshButtonMessages() {
 		setFittedMessage(this.structureButton, structureMessage());
 		setFittedMessage(this.folderButton, Component.translatable("screen.grand_builder.open_structures"));
@@ -481,7 +418,6 @@ public class BuilderMenuScreen extends Screen {
 		setFittedMessage(this.pauseResumeButton, Component.translatable("screen.grand_builder.pause_resume"));
 		setFittedMessage(this.rollbackButton, Component.translatable("screen.grand_builder.rollback"));
 		setFittedMessage(this.cancelPreviewButton, Component.translatable("screen.grand_builder.cancel_preview"));
-		setFittedMessage(this.languageButton, languageMessage());
 		if (this.youtubeButton != null) {
 			this.youtubeButton.setMessage(Component.translatable("screen.grand_builder.youtube.badge"));
 		}
@@ -606,18 +542,7 @@ public class BuilderMenuScreen extends Screen {
 
 		super.render(guiGraphics, mouseX, mouseY, partialTick);
 		renderStructuresFolderTooltip(guiGraphics, mouseX, mouseY);
-		renderLanguageTooltip(guiGraphics, mouseX, mouseY);
 		renderYoutubeBadge(guiGraphics, mouseX, mouseY);
-	}
-
-	private void renderLanguageTooltip(GuiGraphics guiGraphics, int mouseX, int mouseY) {
-		if (languageButton == null || !languageButton.isHovered()) {
-			return;
-		}
-
-		List<String> tooltipLines = new ArrayList<>();
-		tooltipLines.add(Component.translatable("screen.grand_builder.language_tooltip").getString());
-		renderTextTooltip(guiGraphics, mouseX + 12, mouseY - 6, tooltipLines, LANGUAGE_TOOLTIP_MAX_WIDTH);
 	}
 
 	private void renderStructuresFolderTooltip(GuiGraphics guiGraphics, int mouseX, int mouseY) {
