@@ -4,6 +4,7 @@ import com.mojang.blaze3d.platform.InputConstants;
 import dev.grandbuilder.client.BuilderMenuScreen;
 import dev.grandbuilder.client.BuildStatusClientState;
 import dev.grandbuilder.client.GrandBuilderClientEffects;
+import dev.grandbuilder.client.GrandBuilderWorldEffects;
 import dev.grandbuilder.client.PreviewConfirmState;
 import dev.grandbuilder.client.StructureListClientState;
 import dev.grandbuilder.network.BuildControlAction;
@@ -59,6 +60,7 @@ public class GrandBuilderModClient implements ClientModInitializer {
 			context.client().execute(() -> GrandBuilderClientEffects.trigger(payload))
 		);
 		HudRenderCallback.EVENT.register(GrandBuilderClientEffects::render);
+		GrandBuilderWorldEffects.initialize();
 
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
 			GrandBuilderClientEffects.tick(client);

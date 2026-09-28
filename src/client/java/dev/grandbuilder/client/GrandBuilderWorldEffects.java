@@ -1,0 +1,96 @@
+package dev.grandbuilder.client;
+
+import com.mojang.blaze3d.pipeline.BlendFunction;
+import com.mojang.blaze3d.pipeline.RenderPipeline;
+import com.mojang.blaze3d.platform.DepthTestFunction;
+import com.mojang.blaze3d.shaders.UniformType;
+import com.mojang.blaze3d.vertex.ByteBufferBuilder;
+import com.mojang.blaze3d.vertex.DefaultVertexFormat;
+import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.blaze3d.vertex.VertexConsumer;
+import com.mojang.blaze3d.vertex.VertexFormat;
+import dev.grandbuilder.GrandBuilderMod;
+import dev.grandbuilder.client.mixin.RenderTypeAccess;
+import java.util.LinkedHashMap;
+import java.util.List;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
+import net.fabricmc.fabric.api.client.rendering.v1.RenderStateDataKey;
+import net.fabricmc.fabric.api.client.rendering.v1.world.WorldExtractionContext;
+import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderContext;
+import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderEvents;
+import net.minecraft.client.renderer.MultiBufferSource;
+import net.minecraft.client.renderer.rendertype.RenderSetup;
+import net.minecraft.client.renderer.rendertype.RenderType;
+import net.minecraft.world.phys.Vec3;
+
+public final class GrandBuilderWorldEffects {
+	private static final RenderStateDataKey<List<GrandBuilderClientEffects.Frame>> SCENES = RenderStateDataKey.create();
+	private static final RenderType SOLID = layer("effect_solid", false, true);
+	private static final RenderType VEIL = layer("effect_veil", false, false);
+	private static final RenderType GLOW = layer("effect_glow", true, false);
+	private static final LinkedHashMap<RenderType, ByteBufferBuilder> STORAGE = new LinkedHashMap<>();
+	private static final ByteBufferBuilder FALLBACK = new ByteBufferBuilder(256);
+	private static MultiBufferSource.BufferSource buffers;
+
+	private GrandBuilderWorldEffects() {
+	}
+
+	public static void initialize() {
+		STORAGE.put(SOLID, new ByteBufferBuilder(256 * 1024));
+		STORAGE.put(VEIL, new ByteBufferBuilder(128 * 1024));
+		STORAGE.put(GLOW, new ByteBufferBuilder(512 * 1024));
+		buffers = MultiBufferSource.immediateWithBuffers(STORAGE, FALLBACK);
+		WorldRenderEvents.END_EXTRACTION.register(GrandBuilderWorldEffects::extract);
+		WorldRenderEvents.BEFORE_TRANSLUCENT.register(GrandBuilderWorldEffects::draw);
+		ClientLifecycleEvents.CLIENT_STOPPING.register(client -> {
+			STORAGE.values().forEach(ByteBufferBuilder::close);
+			FALLBACK.close();
+		});
+	}
+
+	private static RenderType layer(String name, boolean emissive, boolean writeDepth) {
+		RenderPipeline.Builder builder = RenderPipeline.builder()
+			.withLocation(GrandBuilderMod.id("pipeline/" + name))
+			.withVertexShader(GrandBuilderMod.id("core/effect"))
+			.withFragmentShader(GrandBuilderMod.id("core/effect"))
+			.withUniform("DynamicTransforms", UniformType.UNIFORM_BUFFER)
+			.withUniform("Projection", UniformType.UNIFORM_BUFFER)
+			.withUniform("Fog", UniformType.UNIFORM_BUFFER)
+			.withVertexFormat(DefaultVertexFormat.POSITION_COLOR, VertexFormat.Mode.QUADS)
+			.withDepthTestFunction(DepthTestFunction.LEQUAL_DEPTH_TEST)
+			.withCull(false)
+			.withDepthWrite(writeDepth)
+			.withBlend(emissive ? BlendFunction.ADDITIVE : BlendFunction.TRANSLUCENT);
+		if (emissive) builder.withShaderDefine("EMISSIVE");
+		return RenderTypeAccess.grandBuilder$create(name, RenderSetup.builder(builder.build())
+			.sortOnUpload().bufferSize(256 * 1024).createRenderSetup());
+	}
+
+	private static void extract(WorldExtractionContext context) {
+		context.worldState().setData(SCENES, GrandBuilderClientEffects.extract(
+			context.tickCounter().getGameTimeDeltaPartialTick(false)));
+	}
+
+	private static void draw(WorldRenderContext context) {
+		List<GrandBuilderClientEffects.Frame> frames = context.worldState().getData(SCENES);
+		if (frames == null || frames.isEmpty()) return;
+		Vec3 camera = context.worldState().cameraRenderState.pos;
+		VertexConsumer solid = buffers.getBuffer(SOLID);
+		VertexConsumer veil = buffers.getBuffer(VEIL);
+		VertexConsumer glow = buffers.getBuffer(GLOW);
+		PoseStack matrices = context.matrices();
+		for (GrandBuilderClientEffects.Frame frame : frames) {
+			if (camera.distanceToSqr(frame.x(), frame.y() + frame.height()*0.5, frame.z()) > 256.0*256.0) continue;
+			matrices.pushPose();
+			matrices.translate(frame.x()-camera.x, frame.y()-camera.y, frame.z()-camera.z);
+			EffectGeometry.emit(frame, (material, x, y, z, color) -> {
+				VertexConsumer target = switch (material) { case SOLID -> solid; case VEIL -> veil; case GLOW -> glow; };
+				target.addVertex(matrices.last().pose(), x, y, z).setColor(color);
+			});
+			matrices.popPose();
+		}
+		buffers.endBatch(SOLID);
+		buffers.endBatch(VEIL);
+		buffers.endBatch(GLOW);
+	}
+}

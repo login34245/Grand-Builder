@@ -225,9 +225,7 @@ public final class AnimatedBuildManager {
 			player.displayClientMessage(Component.translatable("message.grand_builder.started", preview.structureName(), speed.displayRate()), true);
 		}
 		player.level().playSound(player, player.blockPosition(), SoundEvents.BEACON_POWER_SELECT, SoundSource.PLAYERS, 1.0f, 0.8f);
-		if (preview.effectMode().instantReveal()) {
-			sendBuildEffect(player, preview.effectMode(), BuildEffectPayload.PHASE_ARRIVAL, preview.effectMode().revealDelayTicks() + 16, arrivalShakeIntensity(preview.effectMode()));
-		}
+		job.syncScene(player.level(), false);
 	}
 
 	public static void cancelPreview(ServerPlayer player) {
@@ -560,6 +558,7 @@ public final class AnimatedBuildManager {
 		}
 
 		job.paused = !job.paused;
+		job.syncScene(player.level(), job.paused);
 		player.displayClientMessage(Component.translatable(job.paused ? "message.grand_builder.paused" : "message.grand_builder.resumed"), true);
 		sendBuildStatus(player, false);
 	}
@@ -643,6 +642,7 @@ public final class AnimatedBuildManager {
 		}
 		if (activeJob != null) {
 			activeJob.restoreClockworkTime(level);
+			activeJob.sendScene(level, BuildEffectPayload.PHASE_STOP, 12, 0, 0.0f);
 		}
 
 		int restored = 0;
@@ -686,6 +686,9 @@ public final class AnimatedBuildManager {
 			if (config.pauseWhenOwnerOffline && owner == null) {
 				job.pausedByOffline = true;
 				job.restoreClockworkTime(level);
+				if ((job.scenePulse++ % 10) == 0) {
+					job.syncScene(level, true);
+				}
 				continue;
 			}
 			if (owner != null && job.pausedByOffline) {
@@ -694,6 +697,9 @@ public final class AnimatedBuildManager {
 			}
 
 			boolean finished = job.tick(level, owner, getSpeed(job.ownerId), config);
+			if (!finished && (job.scenePulse++ % 10) == 0) {
+				job.syncScene(level, job.paused || job.pausedByOffline || job.waitingForChunks);
+			}
 			if (owner != null && (job.statusPulse++ % 20) == 0) {
 				sendBuildStatus(owner, false);
 			}
@@ -704,6 +710,7 @@ public final class AnimatedBuildManager {
 			if (finished) {
 				job.finishEffects(level);
 				job.restoreClockworkTime(level);
+				job.sendScene(level, BuildEffectPayload.PHASE_REVEAL, 28, 0, revealShakeIntensity(job.effectMode));
 				if (owner != null) {
 					owner.displayClientMessage(Component.translatable("message.grand_builder.completed", job.structureName), true);
 					if (job.skippedBlocks > 0) {
@@ -1578,10 +1585,6 @@ public final class AnimatedBuildManager {
 		));
 	}
 
-	private static void sendBuildEffect(ServerPlayer player, BuildEffectMode effectMode, int phaseId, int durationTicks, float intensity) {
-		ServerPlayNetworking.send(player, new BuildEffectPayload(effectMode.networkId(), phaseId, durationTicks, intensity));
-	}
-
 	private static float arrivalShakeIntensity(BuildEffectMode effectMode) {
 		return switch (effectMode) {
 			case METEOR_FORGE -> 1.30f;
@@ -2039,12 +2042,13 @@ public final class AnimatedBuildManager {
 		private int tickDelayCounter;
 		private int effectTick;
 		private int statusPulse;
+		private int scenePulse;
 		private int skippedBlocks;
 		private long clockworkOriginalDayTime = Long.MIN_VALUE;
 		private long clockworkElapsedTicks;
 		private long clockworkWarpSessionTicks;
 		private boolean waitingForChunks;
-		private boolean instantRevealPlacement;
+		private final UUID sceneId = UUID.randomUUID();
 
 		private BuildJob(
 			ResourceKey<Level> dimensionKey,
@@ -2075,6 +2079,33 @@ public final class AnimatedBuildManager {
 			this.effectMode = effectMode;
 			this.effectBounds = effectBounds;
 			this.totalBlocks = this.dryBlocks.size() + this.fluidBlocks.size();
+		}
+
+		private void syncScene(ServerLevel level, boolean isPaused) {
+			int duration = effectMode.instantReveal() ? effectMode.revealDelayTicks()
+				: effectMode == BuildEffectMode.CLOCKWORK_GRID ? CLOCKWORK_BUILD_DURATION_TICKS
+				: (int) Math.min(Integer.MAX_VALUE, estimateTicks(totalBlocks, getSpeed(ownerId)));
+			int phase = isPaused ? BuildEffectPayload.PHASE_PAUSED
+				: effectMode.instantReveal() ? BuildEffectPayload.PHASE_ARRIVAL : BuildEffectPayload.PHASE_BUILD;
+			sendScene(level, phase, duration, effectTick, arrivalShakeIntensity(effectMode));
+		}
+
+		private void sendScene(ServerLevel level, int phase, int duration, int age, float power) {
+			if (effectMode == BuildEffectMode.STANDARD) {
+				return;
+			}
+			BlockPos min = new BlockPos(effectBounds.minX(), effectBounds.minY(), effectBounds.minZ());
+			BlockPos max = new BlockPos(effectBounds.maxX(), effectBounds.maxY(), effectBounds.maxZ());
+			BuildEffectPayload payload = new BuildEffectPayload(sceneId, dimensionKey.identifier(), min, max,
+				effectMode.networkId(), phase, duration, age, (float) (progressPercent() / 100.0), power);
+			double centerX = (min.getX() + max.getX() + 1.0) * 0.5;
+			double centerZ = (min.getZ() + max.getZ() + 1.0) * 0.5;
+			for (ServerPlayer viewer : level.players()) {
+				if (viewer.distanceToSqr(centerX, (min.getY() + max.getY() + 1.0) * 0.5, centerZ) <= 256.0 * 256.0
+					&& ServerPlayNetworking.canSend(viewer, BuildEffectPayload.TYPE)) {
+					ServerPlayNetworking.send(viewer, payload);
+				}
+			}
 		}
 
 		private boolean tick(ServerLevel level, ServerPlayer owner, BuildSpeed speed, GrandBuilderConfig config) {
@@ -2201,9 +2232,6 @@ public final class AnimatedBuildManager {
 			boolean finished = placeAllInstantly(level, config);
 			if (finished) {
 				spawnInstantRevealBurst(level);
-				if (owner != null) {
-					sendBuildEffect(owner, effectMode, BuildEffectPayload.PHASE_REVEAL, 28, revealShakeIntensity(effectMode));
-				}
 			}
 			return finished;
 		}
@@ -2229,32 +2257,27 @@ public final class AnimatedBuildManager {
 		}
 
 		private boolean placeAllInstantly(ServerLevel level, GrandBuilderConfig config) {
-			instantRevealPlacement = true;
-			try {
-				while (dryCursor < dryBlocks.size()) {
-					PlacementResult result = placeBlock(level, dryBlocks.get(dryCursor), dryCursor + 1, config);
-					if (result == PlacementResult.WAITING_FOR_CHUNK) {
-						waitingForChunks = true;
-						return false;
-					}
-					dryCursor++;
-					if (result == PlacementResult.SKIPPED) {
-						skippedBlocks++;
-					}
+			while (dryCursor < dryBlocks.size()) {
+				PlacementResult result = placeBlock(level, dryBlocks.get(dryCursor), dryCursor + 1, config);
+				if (result == PlacementResult.WAITING_FOR_CHUNK) {
+					waitingForChunks = true;
+					return false;
 				}
-				while (fluidCursor < fluidBlocks.size()) {
-					PlacementResult result = placeBlock(level, fluidBlocks.get(fluidCursor), dryBlocks.size() + fluidCursor + 1, config);
-					if (result == PlacementResult.WAITING_FOR_CHUNK) {
-						waitingForChunks = true;
-						return false;
-					}
-					fluidCursor++;
-					if (result == PlacementResult.SKIPPED) {
-						skippedBlocks++;
-					}
+				dryCursor++;
+				if (result == PlacementResult.SKIPPED) {
+					skippedBlocks++;
 				}
-			} finally {
-				instantRevealPlacement = false;
+			}
+			while (fluidCursor < fluidBlocks.size()) {
+				PlacementResult result = placeBlock(level, fluidBlocks.get(fluidCursor), dryBlocks.size() + fluidCursor + 1, config);
+				if (result == PlacementResult.WAITING_FOR_CHUNK) {
+					waitingForChunks = true;
+					return false;
+				}
+				fluidCursor++;
+				if (result == PlacementResult.SKIPPED) {
+					skippedBlocks++;
+				}
 			}
 			return true;
 		}
@@ -2263,554 +2286,64 @@ public final class AnimatedBuildManager {
 			if (effectMode == BuildEffectMode.STANDARD) {
 				return;
 			}
-
 			effectTick++;
-			if (effectMode == BuildEffectMode.RIFT_BLOOM) {
-				spawnRiftBloomEffect(level);
-				return;
-			}
-			if (effectMode == BuildEffectMode.METEOR_FORGE) {
-				spawnMeteorForgeEffect(level);
-				return;
-			}
-			if (effectMode == BuildEffectMode.CLOCKWORK_GRID) {
-				spawnClockworkAmbientEffect(level);
-				return;
-			}
-			if (effectMode == BuildEffectMode.AURORA_WEAVE) {
-				spawnAuroraAmbientEffect(level);
-				return;
-			}
-
-			double centerX = (effectBounds.minX() + effectBounds.maxX()) * 0.5 + 0.5;
-			double centerZ = (effectBounds.minZ() + effectBounds.maxZ()) * 0.5 + 0.5;
-			double buildWidth = Math.max(1.0, effectBounds.maxX() - effectBounds.minX() + 1.0);
-			double buildDepth = Math.max(1.0, effectBounds.maxZ() - effectBounds.minZ() + 1.0);
-			double radius = Math.max(4.0, Math.min(18.0, Math.max(buildWidth, buildDepth) * 0.62));
-			double arrival = Math.max(0.0, 1.0 - Math.min(1.0, effectTick / (double) effectMode.revealDelayTicks()));
-			double charge = 1.0 - arrival;
-			double shipX = centerX - facing.getStepX() * arrival * (radius + 16.0);
-			double shipZ = centerZ - facing.getStepZ() * arrival * (radius + 16.0);
-			double shipY = Math.min(level.getMaxY() - 2.0, effectBounds.maxY() + 8.0 + Math.sin(effectTick * 0.10) * 1.1);
-			double beamBottom = effectBounds.minY() + 0.35;
-			double spin = effectTick * 0.20;
-
-			spawnUfoHull(level, shipX, shipY, shipZ, radius, spin, charge);
-			spawnUfoTrail(level, shipX, shipY, shipZ, radius, arrival);
-			spawnUfoBeam(level, shipX, shipY, shipZ, beamBottom, radius, charge, spin);
-			spawnUfoStructureEnvelope(level, centerX, centerZ, radius, charge, spin);
-
-			double beamRadius = Math.min(3.8, Math.max(1.4, radius * 0.22));
-			if (arrival <= 0.18) {
-				level.sendParticles(ParticleTypes.ELECTRIC_SPARK, centerX, effectBounds.minY() + 1.0, centerZ, 10, beamRadius, 0.35, beamRadius, 0.08);
-				level.sendParticles(ParticleTypes.END_ROD, centerX, effectBounds.minY() + 1.2, centerZ, 8, beamRadius * 0.75, 0.45, beamRadius * 0.75, 0.05);
-			}
-
-			if (effectTick <= effectMode.revealDelayTicks() && (effectTick % 5) == 0) {
-				level.sendParticles(ParticleTypes.SONIC_BOOM, shipX, shipY, shipZ, 1, 0.0, 0.0, 0.0, 0.0);
-			}
-			if ((effectTick % 16) == 1) {
-				level.playSound(null, BlockPos.containing(shipX, shipY, shipZ), SoundEvents.PORTAL_AMBIENT, SoundSource.BLOCKS, 0.45f, 0.65f);
-				level.playSound(null, BlockPos.containing(shipX, shipY, shipZ), SoundEvents.BEACON_AMBIENT, SoundSource.BLOCKS, 0.35f, 1.8f);
-			}
-		}
-
-		private void spawnUfoHull(ServerLevel level, double shipX, double shipY, double shipZ, double radius, double spin, double charge) {
-			int rimPoints = 42;
-			double rimRadius = Math.max(2.8, radius * 0.72);
-			for (int ring = 0; ring < 3; ring++) {
-				double ringOffset = (ring - 1) * 0.28;
-				double ringRadius = rimRadius * (1.0 - Math.abs(ring - 1) * 0.10);
-				for (int i = 0; i < rimPoints; i++) {
-					double angle = spin * (ring == 1 ? 1.0 : -0.72) + (Math.PI * 2.0 * i) / rimPoints;
-					double x = shipX + Math.cos(angle) * ringRadius;
-					double z = shipZ + Math.sin(angle) * ringRadius;
-					double y = shipY + ringOffset + Math.sin(angle * 4.0 + effectTick * 0.18) * 0.12;
-					ParticleOptions particle = (i + ring + effectTick) % 4 == 0 ? ParticleTypes.ELECTRIC_SPARK : ParticleTypes.END_ROD;
-					level.sendParticles(particle, x, y, z, 1, 0.02, 0.02, 0.02, 0.0);
-				}
-			}
-
-			int domePoints = 28;
-			double domeRadius = Math.max(1.4, rimRadius * 0.38);
-			double domeLift = 0.65 + charge * 0.40;
-			for (int i = 0; i < domePoints; i++) {
-				double angle = -spin * 1.35 + (Math.PI * 2.0 * i) / domePoints;
-				double wave = 0.45 + 0.55 * Math.sin(angle * 2.0 + effectTick * 0.11);
-				double x = shipX + Math.cos(angle) * domeRadius * wave;
-				double z = shipZ + Math.sin(angle) * domeRadius * wave;
-				double y = shipY + domeLift + Math.sin(angle * 3.0 + effectTick * 0.10) * 0.22;
-				level.sendParticles(i % 2 == 0 ? ParticleTypes.WITCH : ParticleTypes.ENCHANT, x, y, z, 1, 0.03, 0.03, 0.03, 0.0);
-			}
-		}
-
-		private void spawnUfoTrail(ServerLevel level, double shipX, double shipY, double shipZ, double radius, double arrival) {
-			if (arrival <= 0.02) {
-				return;
-			}
-
-			double rearX = shipX - facing.getStepX() * (radius * 0.72);
-			double rearZ = shipZ - facing.getStepZ() * (radius * 0.72);
-			double sidewaysX = facing.getStepZ();
-			double sidewaysZ = -facing.getStepX();
-			for (int i = 0; i < 18; i++) {
-				double trail = i * 0.58;
-				double side = Math.sin(effectTick * 0.32 + i * 0.9) * Math.min(2.8, radius * 0.15);
-				double x = rearX - facing.getStepX() * trail + sidewaysX * side;
-				double z = rearZ - facing.getStepZ() * trail + sidewaysZ * side;
-				double y = shipY + Math.cos(effectTick * 0.22 + i) * 0.34 - i * 0.025;
-				double spread = 0.10 + i * 0.035;
-				level.sendParticles(i % 3 == 0 ? ParticleTypes.PORTAL : ParticleTypes.WITCH, x, y, z, 1, spread, spread * 0.55, spread, 0.02);
-				if ((i & 3) == 0) {
-					level.sendParticles(ParticleTypes.ELECTRIC_SPARK, x, y, z, 1, 0.08, 0.08, 0.08, 0.05);
-				}
-			}
-		}
-
-		private void spawnUfoBeam(ServerLevel level, double shipX, double shipY, double shipZ, double beamBottom, double radius, double charge, double spin) {
-			int layers = 18;
-			for (int i = 0; i <= layers; i++) {
-				double t = i / (double) layers;
-				double y = shipY + (beamBottom - shipY) * t;
-				double spread = 0.18 + t * Math.min(4.4, radius * 0.33);
-				int count = 2 + (int) Math.round(t * 5.0 + charge * 3.0);
-				level.sendParticles(ParticleTypes.REVERSE_PORTAL, shipX, y, shipZ, count, spread, 0.04, spread, 0.035);
-				if ((effectTick + i) % 2 == 0) {
-					level.sendParticles(ParticleTypes.WITCH, shipX, y, shipZ, 2, spread * 0.72, 0.03, spread * 0.72, 0.0);
-				}
-				if ((i & 1) == 0) {
-					spawnParticleRing(level, (i + effectTick) % 3 == 0 ? ParticleTypes.ELECTRIC_SPARK : ParticleTypes.END_ROD, shipX, y, shipZ, spread, 12, spin + i * 0.31, 0.0);
-				}
-			}
-		}
-
-		private void spawnUfoStructureEnvelope(ServerLevel level, double centerX, double centerZ, double radius, double charge, double spin) {
-			if (charge < 0.22) {
-				return;
-			}
-
-			double minX = effectBounds.minX() + 0.5;
-			double minY = effectBounds.minY() + 0.25;
-			double minZ = effectBounds.minZ() + 0.5;
-			double maxX = effectBounds.maxX() + 0.5;
-			double maxY = effectBounds.maxY() + 1.1;
-			double maxZ = effectBounds.maxZ() + 0.5;
-			int xPoints = pointsForDistance(maxX - minX);
-			int yPoints = pointsForDistance(maxY - minY);
-			int zPoints = pointsForDistance(maxZ - minZ);
-			ParticleOptions edgeParticle = (effectTick & 1) == 0 ? ParticleTypes.ELECTRIC_SPARK : ParticleTypes.END_ROD;
-
-			spawnEdgeLine(level, edgeParticle, minX, minY, minZ, maxX, minY, minZ, xPoints);
-			spawnEdgeLine(level, edgeParticle, minX, minY, maxZ, maxX, minY, maxZ, xPoints);
-			spawnEdgeLine(level, edgeParticle, minX, maxY, minZ, maxX, maxY, minZ, xPoints);
-			spawnEdgeLine(level, edgeParticle, minX, maxY, maxZ, maxX, maxY, maxZ, xPoints);
-			spawnEdgeLine(level, edgeParticle, minX, minY, minZ, minX, minY, maxZ, zPoints);
-			spawnEdgeLine(level, edgeParticle, maxX, minY, minZ, maxX, minY, maxZ, zPoints);
-			spawnEdgeLine(level, edgeParticle, minX, maxY, minZ, minX, maxY, maxZ, zPoints);
-			spawnEdgeLine(level, edgeParticle, maxX, maxY, minZ, maxX, maxY, maxZ, zPoints);
-			spawnEdgeLine(level, edgeParticle, minX, minY, minZ, minX, maxY, minZ, yPoints);
-			spawnEdgeLine(level, edgeParticle, maxX, minY, minZ, maxX, maxY, minZ, yPoints);
-			spawnEdgeLine(level, edgeParticle, minX, minY, maxZ, minX, maxY, maxZ, yPoints);
-			spawnEdgeLine(level, edgeParticle, maxX, minY, maxZ, maxX, maxY, maxZ, yPoints);
-
-			double height = Math.max(1.0, maxY - minY);
-			for (int i = 0; i < 34; i++) {
-				double angle = spin * 1.75 + (Math.PI * 2.0 * i) / 34.0;
-				double y = minY + Math.floorMod(effectTick + i * 3, (int) Math.max(2.0, height + 4.0)) / Math.max(2.0, height + 4.0) * height;
-				double orbitRadius = radius * (0.35 + 0.18 * Math.sin(i * 1.7 + effectTick * 0.08));
-				double x = centerX + Math.cos(angle) * orbitRadius;
-				double z = centerZ + Math.sin(angle) * orbitRadius;
-				level.sendParticles(i % 4 == 0 ? ParticleTypes.ENCHANT : ParticleTypes.REVERSE_PORTAL, x, y, z, 1, 0.08, 0.08, 0.08, 0.0);
-			}
-		}
-
-		private void spawnParticleRing(ServerLevel level, ParticleOptions particle, double centerX, double centerY, double centerZ, double radius, int points, double phase, double verticalWave) {
-			for (int i = 0; i < points; i++) {
-				double angle = phase + (Math.PI * 2.0 * i) / points;
-				double x = centerX + Math.cos(angle) * radius;
-				double z = centerZ + Math.sin(angle) * radius;
-				double y = centerY + Math.sin(angle * 2.0 + effectTick * 0.13) * verticalWave;
-				level.sendParticles(particle, x, y, z, 1, 0.02, 0.02, 0.02, 0.0);
-			}
-		}
-
-		private void spawnEdgeLine(ServerLevel level, ParticleOptions particle, double x1, double y1, double z1, double x2, double y2, double z2, int points) {
-			int count = Math.max(2, points);
-			for (int i = 0; i <= count; i++) {
-				double t = i / (double) count;
-				double x = x1 + (x2 - x1) * t;
-				double y = y1 + (y2 - y1) * t;
-				double z = z1 + (z2 - z1) * t;
-				level.sendParticles(particle, x, y, z, 1, 0.015, 0.015, 0.015, 0.0);
-			}
-		}
-
-		private int pointsForDistance(double distance) {
-			return Math.max(3, Math.min(18, (int) Math.ceil(Math.abs(distance) / 2.0)));
-		}
-
-		private void spawnRiftBloomEffect(ServerLevel level) {
-			double centerX = (effectBounds.minX() + effectBounds.maxX()) * 0.5 + 0.5;
-			double centerZ = (effectBounds.minZ() + effectBounds.maxZ()) * 0.5 + 0.5;
-			double minY = effectBounds.minY() + 0.35;
-			double maxY = Math.min(level.getMaxY() - 2.0, effectBounds.maxY() + 5.0);
-			double height = Math.max(4.0, maxY - minY);
-			double progress = Math.min(1.0, effectTick / (double) Math.max(1, effectMode.revealDelayTicks()));
-			double open = progress * progress * (3.0 - 2.0 * progress);
-			double sidewaysX = facing.getStepZ();
-			double sidewaysZ = -facing.getStepX();
-			double normalX = facing.getStepX();
-			double normalZ = facing.getStepZ();
-			int tearPoints = 36;
-
-			for (int i = 0; i < tearPoints; i++) {
-				double t = i / (double) (tearPoints - 1);
-				double y = minY + height * t;
-				double wobble = Math.sin(t * Math.PI * 4.0 + effectTick * 0.17) * (0.20 + open * 1.25);
-				double seam = Math.sin(t * Math.PI + effectTick * 0.08) * open * 0.35;
-				double x = centerX + sidewaysX * wobble + normalX * seam;
-				double z = centerZ + sidewaysZ * wobble + normalZ * seam;
-				level.sendParticles(i % 3 == 0 ? ParticleTypes.ELECTRIC_SPARK : ParticleTypes.REVERSE_PORTAL, x, y, z, 2, 0.10 + open * 0.08, 0.06, 0.10 + open * 0.08, 0.035);
-				if ((i + effectTick) % 5 == 0) {
-					level.sendParticles(ParticleTypes.WITCH, x, y, z, 1, 0.16, 0.08, 0.16, 0.0);
-				}
-			}
-
-			for (int ring = 0; ring < 4; ring++) {
-				double y = minY + height * ((ring + 1.0) / 5.0);
-				double radius = (1.0 + ring * 0.52 + open * 2.1) * (0.72 + open * 0.38);
-				spawnParticleRing(level, ring % 2 == 0 ? ParticleTypes.END_ROD : ParticleTypes.REVERSE_PORTAL, centerX, y, centerZ, radius, 24, effectTick * (0.14 + ring * 0.02), 0.22 + open * 0.15);
-			}
-
-			if (open > 0.35) {
-				double minX = effectBounds.minX() + 0.5;
-				double boxMinY = effectBounds.minY() + 0.25;
-				double minZ = effectBounds.minZ() + 0.5;
-				double maxX = effectBounds.maxX() + 0.5;
-				double boxMaxY = effectBounds.maxY() + 1.1;
-				double maxZ = effectBounds.maxZ() + 0.5;
-				ParticleOptions edgeParticle = (effectTick & 1) == 0 ? ParticleTypes.WITCH : ParticleTypes.END_ROD;
-				spawnEdgeLine(level, edgeParticle, minX, boxMinY, minZ, maxX, boxMinY, minZ, pointsForDistance(maxX - minX));
-				spawnEdgeLine(level, edgeParticle, minX, boxMaxY, maxZ, maxX, boxMaxY, maxZ, pointsForDistance(maxX - minX));
-				spawnEdgeLine(level, edgeParticle, minX, boxMinY, minZ, minX, boxMaxY, minZ, pointsForDistance(boxMaxY - boxMinY));
-				spawnEdgeLine(level, edgeParticle, maxX, boxMinY, maxZ, maxX, boxMaxY, maxZ, pointsForDistance(boxMaxY - boxMinY));
-			}
-
-			if ((effectTick % 14) == 1) {
-				level.playSound(null, BlockPos.containing(centerX, minY + height * 0.45, centerZ), SoundEvents.PORTAL_AMBIENT, SoundSource.BLOCKS, 0.55f, 0.45f + (float) open * 0.55f);
-				level.playSound(null, BlockPos.containing(centerX, minY + height * 0.45, centerZ), SoundEvents.ILLUSIONER_CAST_SPELL, SoundSource.BLOCKS, 0.28f, 0.85f + (float) open * 0.40f);
-			}
-		}
-
-		private void spawnMeteorForgeEffect(ServerLevel level) {
-			double centerX = (effectBounds.minX() + effectBounds.maxX()) * 0.5 + 0.5;
-			double centerZ = (effectBounds.minZ() + effectBounds.maxZ()) * 0.5 + 0.5;
-			double targetY = Math.min(level.getMaxY() - 3.0, effectBounds.maxY() + 1.6);
-			double progress = Math.min(1.0, effectTick / (double) Math.max(1, effectMode.revealDelayTicks()));
-			double eased = 1.0 - Math.pow(1.0 - progress, 2.45);
-			double startY = Math.min(level.getMaxY() - 2.0, effectBounds.maxY() + 34.0);
-			double arcX = centerX - facing.getStepX() * (18.0 * (1.0 - eased)) + Math.sin(effectTick * 0.16) * 0.8;
-			double arcZ = centerZ - facing.getStepZ() * (18.0 * (1.0 - eased)) + Math.cos(effectTick * 0.14) * 0.8;
-			double meteorY = startY + (targetY - startY) * eased;
-			double coreRadius = 0.65 + progress * 1.25;
-
-			level.sendParticles(ParticleTypes.FLAME, arcX, meteorY, arcZ, 18, coreRadius * 0.42, coreRadius * 0.42, coreRadius * 0.42, 0.06);
-			level.sendParticles(ParticleTypes.LAVA, arcX, meteorY, arcZ, 6, coreRadius * 0.30, coreRadius * 0.25, coreRadius * 0.30, 0.0);
-			level.sendParticles(ParticleTypes.ELECTRIC_SPARK, arcX, meteorY, arcZ, 6, coreRadius * 0.22, coreRadius * 0.22, coreRadius * 0.22, 0.14);
-
-			for (int i = 0; i < 18; i++) {
-				double trail = i * (0.72 + progress * 0.18);
-				double sway = Math.sin(effectTick * 0.33 + i * 0.9) * (0.28 + i * 0.025);
-				double x = arcX - facing.getStepX() * trail + facing.getStepZ() * sway;
-				double z = arcZ - facing.getStepZ() * trail - facing.getStepX() * sway;
-				double y = meteorY + trail * 0.72 + Math.cos(effectTick * 0.27 + i) * 0.18;
-				level.sendParticles(i % 3 == 0 ? ParticleTypes.LARGE_SMOKE : ParticleTypes.FLAME, x, y, z, 1, 0.10 + i * 0.025, 0.10 + i * 0.025, 0.10 + i * 0.025, 0.02);
-			}
-
-			if (progress > 0.55) {
-				double radius = Math.max(2.6, Math.min(16.0, Math.max(effectBounds.maxX() - effectBounds.minX() + 1.0, effectBounds.maxZ() - effectBounds.minZ() + 1.0) * (0.24 + progress * 0.18)));
-				for (int ring = 0; ring < 3; ring++) {
-					spawnParticleRing(level, ring == 1 ? ParticleTypes.FLAME : ParticleTypes.ELECTRIC_SPARK, centerX, effectBounds.minY() + 0.55 + ring * 0.25, centerZ, radius + ring * 1.8, 36, effectTick * 0.12 + ring, 0.05);
-				}
-			}
-
-			if ((effectTick % 10) == 1) {
-				level.playSound(null, BlockPos.containing(arcX, meteorY, arcZ), SoundEvents.BLAZE_BURN, SoundSource.BLOCKS, 0.42f, 0.65f + (float) progress * 0.35f);
-			}
-			if ((effectTick % 18) == 6) {
-				level.playSound(null, BlockPos.containing(centerX, targetY, centerZ), SoundEvents.ANVIL_LAND, SoundSource.BLOCKS, 0.22f, 0.55f);
-			}
-		}
-
-		private void spawnClockworkAmbientEffect(ServerLevel level) {
-			double centerX = (effectBounds.minX() + effectBounds.maxX()) * 0.5 + 0.5;
-			double centerY = Math.min(level.getMaxY() - 2.0, effectBounds.maxY() + 2.0);
-			double centerZ = (effectBounds.minZ() + effectBounds.maxZ()) * 0.5 + 0.5;
-			double baseRadius = Math.max(2.8, Math.min(14.0, Math.max(effectBounds.maxX() - effectBounds.minX() + 1.0, effectBounds.maxZ() - effectBounds.minZ() + 1.0) * 0.45));
-			double dialY = centerY + 0.35;
-			int hourMarks = 12;
-			for (int mark = 0; mark < hourMarks; mark++) {
-				double angle = (Math.PI * 2.0 * mark) / hourMarks;
-				double outer = baseRadius + 4.0;
-				double inner = outer - (mark % 3 == 0 ? 1.3 : 0.7);
-				spawnEdgeLine(
-					level,
-					mark % 3 == 0 ? ParticleTypes.END_ROD : ParticleTypes.ELECTRIC_SPARK,
-					centerX + Math.cos(angle) * inner,
-					dialY,
-					centerZ + Math.sin(angle) * inner,
-					centerX + Math.cos(angle) * outer,
-					dialY,
-					centerZ + Math.sin(angle) * outer,
-					mark % 3 == 0 ? 4 : 2
-				);
-			}
-
-			for (int gear = 0; gear < 3; gear++) {
-				int teeth = 18 + gear * 8;
-				double radius = baseRadius + gear * 1.45;
-				double y = centerY - gear * 0.55;
-				double spin = effectTick * (gear % 2 == 0 ? 0.10 : -0.075);
-				for (int i = 0; i < teeth; i++) {
-					double angle = spin + (Math.PI * 2.0 * i) / teeth;
-					double tooth = (i & 1) == 0 ? 0.34 : -0.12;
-					double x = centerX + Math.cos(angle) * (radius + tooth);
-					double z = centerZ + Math.sin(angle) * (radius + tooth);
-					level.sendParticles((i + gear + effectTick) % 4 == 0 ? ParticleTypes.CRIT : ParticleTypes.ELECTRIC_SPARK, x, y, z, 1, 0.015, 0.015, 0.015, 0.0);
-				}
-			}
-
-			double minuteAngle = effectTick * 0.52;
-			double hourAngle = effectTick * 0.145 + Math.PI * 0.35;
-			spawnEdgeLine(level, ParticleTypes.END_ROD, centerX, dialY, centerZ, centerX + Math.cos(minuteAngle) * (baseRadius + 3.5), dialY, centerZ + Math.sin(minuteAngle) * (baseRadius + 3.5), 14);
-			spawnEdgeLine(level, ParticleTypes.CRIT, centerX, dialY + 0.06, centerZ, centerX + Math.cos(hourAngle) * (baseRadius + 1.6), dialY + 0.06, centerZ + Math.sin(hourAngle) * (baseRadius + 1.6), 10);
-
-			int scanCount = 9;
-			for (int i = 0; i < scanCount; i++) {
-				double t = Math.floorMod(effectTick + i * 5, 36) / 35.0;
-				double y = effectBounds.minY() + 0.4 + (effectBounds.maxY() - effectBounds.minY() + 0.8) * t;
-				spawnEdgeLine(level, ParticleTypes.END_ROD, effectBounds.minX() + 0.5, y, effectBounds.minZ() + 0.5, effectBounds.maxX() + 0.5, y, effectBounds.maxZ() + 0.5, 9);
-			}
-
-			for (int i = 0; i < 16; i++) {
-				double phase = effectTick * 0.42 + i * 0.87;
-				double radius = baseRadius * (0.36 + (i % 5) * 0.09);
-				double y = effectBounds.minY() + 0.8 + Math.floorMod(effectTick * 2 + i * 7, Math.max(2, effectBounds.maxY() - effectBounds.minY() + 3));
-				double x = centerX + Math.cos(phase) * radius;
-				double z = centerZ + Math.sin(phase * 1.13) * radius;
-				level.sendParticles(i % 4 == 0 ? ParticleTypes.TRIAL_SPAWNER_DETECTED_PLAYER_OMINOUS : ParticleTypes.ELECTRIC_SPARK, x, y, z, 1, 0.08, 0.08, 0.08, 0.0);
-			}
-
-			long cycle = Math.floorMod(level.getDayTime(), 24000L);
-			boolean nightSlice = cycle >= 12000L;
-			if ((effectTick % 6) == 0) {
-				level.sendParticles(
-					nightSlice ? ParticleTypes.REVERSE_PORTAL : ParticleTypes.FIREWORK,
-					centerX,
-					effectBounds.maxY() + 2.0,
-					centerZ,
-					nightSlice ? 18 : 2,
-					baseRadius * 0.38,
-					1.1,
-					baseRadius * 0.38,
-					nightSlice ? 0.06 : 0.0
-				);
-			}
-			if ((effectTick % 4) == 0) {
-				float pitch = (effectTick % 8) == 0 ? 0.92f : 1.18f;
-				level.playSound(null, BlockPos.containing(centerX, centerY, centerZ), GrandBuilderMod.CLOCK_TICK, SoundSource.BLOCKS, 0.82f, pitch);
-			}
-			if ((effectTick % 28) == 1) {
-				level.playSound(null, BlockPos.containing(centerX, centerY, centerZ), SoundEvents.COPPER_BULB_TURN_ON, SoundSource.BLOCKS, 0.35f, 1.25f);
-			}
-		}
-
-		private void spawnAuroraAmbientEffect(ServerLevel level) {
-			double minX = effectBounds.minX() + 0.5;
-			double maxX = effectBounds.maxX() + 0.5;
-			double minZ = effectBounds.minZ() + 0.5;
-			double maxZ = effectBounds.maxZ() + 0.5;
-			double centerX = (minX + maxX) * 0.5;
-			double centerZ = (minZ + maxZ) * 0.5;
-			double topY = Math.min(level.getMaxY() - 2.0, effectBounds.maxY() + 4.0);
-			double width = Math.max(1.0, maxX - minX);
-			double depth = Math.max(1.0, maxZ - minZ);
-			double sidewaysX = facing.getStepZ();
-			double sidewaysZ = -facing.getStepX();
-
-			for (int curtain = 0; curtain < 5; curtain++) {
-				double curtainOffset = (curtain - 2) * Math.max(1.0, depth / 5.0);
-				for (int i = 0; i < 24; i++) {
-					double t = i / 23.0;
-					double across = (t - 0.5) * (width + 4.0);
-					double wave = Math.sin(effectTick * 0.065 + t * Math.PI * 3.0 + curtain * 0.7);
-					double x = centerX + sidewaysX * across + facing.getStepX() * (curtainOffset + wave * 0.85);
-					double z = centerZ + sidewaysZ * across + facing.getStepZ() * (curtainOffset + wave * 0.85);
-					double y = topY - Math.abs(wave) * 1.2 - (i % 5) * 0.08;
-					level.sendParticles((i + curtain) % 3 == 0 ? ParticleTypes.GLOW : ParticleTypes.END_ROD, x, y, z, 1, 0.05, 0.05, 0.05, 0.0);
-					if ((i + effectTick + curtain) % 9 == 0) {
-						level.sendParticles(ParticleTypes.ENCHANT, x, y - 1.0, z, 1, 0.15, 0.45, 0.15, 0.02);
+			BlockPos center = effectCenter(level);
+			switch (effectMode) {
+				case UFO_INVASION -> {
+					if ((effectTick % 16) == 1) {
+						level.playSound(null, center, SoundEvents.PORTAL_AMBIENT, SoundSource.BLOCKS, 0.45f, 0.65f);
+						level.playSound(null, center, SoundEvents.BEACON_AMBIENT, SoundSource.BLOCKS, 0.35f, 1.8f);
 					}
 				}
+				case RIFT_BLOOM -> {
+					if ((effectTick % 16) == 1) {
+						level.playSound(null, center, SoundEvents.PORTAL_AMBIENT, SoundSource.BLOCKS, 0.55f, 0.65f);
+					}
+				}
+				case METEOR_FORGE -> {
+					if ((effectTick % 10) == 1) {
+						level.playSound(null, center, SoundEvents.BLAZE_BURN, SoundSource.BLOCKS, 0.42f, 0.75f);
+					}
+				}
+				case CLOCKWORK_GRID -> {
+					if ((effectTick % 4) == 0) {
+						float pitch = (effectTick % 8) == 0 ? 0.92f : 1.18f;
+						level.playSound(null, center, GrandBuilderMod.CLOCK_TICK, SoundSource.BLOCKS, 0.82f, pitch);
+					}
+				}
+				case AURORA_WEAVE -> {
+					if ((effectTick % 42) == 1) {
+						level.playSound(null, center, SoundEvents.AMETHYST_BLOCK_CHIME, SoundSource.BLOCKS, 0.32f, 1.65f);
+					}
+				}
+				default -> { }
 			}
+		}
 
-			for (int i = 0; i < 12; i++) {
-				double angle = effectTick * 0.045 + i * Math.PI * 2.0 / 12.0;
-				double radius = Math.max(width, depth) * 0.28 + Math.sin(effectTick * 0.05 + i) * 0.65;
-				double x = centerX + Math.cos(angle) * radius;
-				double z = centerZ + Math.sin(angle) * radius;
-				double y = effectBounds.minY() + 0.7 + Math.floorMod(effectTick + i * 4, Math.max(2, effectBounds.maxY() - effectBounds.minY() + 2));
-				level.sendParticles(ParticleTypes.GLOW, x, y, z, 1, 0.08, 0.08, 0.08, 0.0);
-			}
-
-			if ((effectTick % 42) == 1) {
-				level.playSound(null, BlockPos.containing(centerX, topY, centerZ), SoundEvents.AMETHYST_BLOCK_CHIME, SoundSource.BLOCKS, 0.32f, 1.65f);
-			}
+		private BlockPos effectCenter(ServerLevel level) {
+			return BlockPos.containing(
+				(effectBounds.minX() + effectBounds.maxX() + 1.0) * 0.5,
+				Math.min(level.getMaxY() - 2.0, effectBounds.maxY() + 2.0),
+				(effectBounds.minZ() + effectBounds.maxZ() + 1.0) * 0.5
+			);
 		}
 
 		private void spawnInstantRevealBurst(ServerLevel level) {
+			BlockPos center = effectCenter(level);
 			switch (effectMode) {
-				case RIFT_BLOOM -> spawnRiftRevealBurst(level);
-				case METEOR_FORGE -> spawnMeteorRevealBurst(level);
-				default -> spawnUfoRevealBurst(level);
-			}
-		}
-
-		private void spawnUfoRevealBurst(ServerLevel level) {
-			double centerX = (effectBounds.minX() + effectBounds.maxX()) * 0.5 + 0.5;
-			double centerY = Math.min(level.getMaxY() - 2.0, effectBounds.maxY() + 2.2);
-			double centerZ = (effectBounds.minZ() + effectBounds.maxZ()) * 0.5 + 0.5;
-			double width = Math.max(1.0, effectBounds.maxX() - effectBounds.minX() + 1.0);
-			double depth = Math.max(1.0, effectBounds.maxZ() - effectBounds.minZ() + 1.0);
-			double radius = Math.max(3.5, Math.min(20.0, Math.max(width, depth) * 0.56));
-			BlockPos center = BlockPos.containing(centerX, centerY, centerZ);
-
-			level.sendParticles(ParticleTypes.SONIC_BOOM, centerX, centerY, centerZ, 1, 0.0, 0.0, 0.0, 0.0);
-			level.sendParticles(ParticleTypes.EXPLOSION_EMITTER, centerX, centerY, centerZ, 1, 0.0, 0.0, 0.0, 0.0);
-			level.sendParticles(ParticleTypes.ELECTRIC_SPARK, centerX, centerY, centerZ, 180, radius, 3.0, radius, 0.28);
-			level.sendParticles(ParticleTypes.END_ROD, centerX, centerY, centerZ, 140, radius * 0.65, 2.5, radius * 0.65, 0.18);
-			level.sendParticles(ParticleTypes.REVERSE_PORTAL, centerX, centerY - 1.1, centerZ, 130, radius * 0.45, 1.7, radius * 0.45, 0.12);
-			for (int ring = 0; ring < 7; ring++) {
-				double ringY = effectBounds.minY() + 0.6 + ring * Math.max(0.55, (effectBounds.maxY() - effectBounds.minY() + 1.0) / 8.0);
-				double ringRadius = radius * (0.30 + ring * 0.13);
-				spawnParticleRing(level, ring % 2 == 0 ? ParticleTypes.ELECTRIC_SPARK : ParticleTypes.END_ROD, centerX, ringY, centerZ, ringRadius, 64, ring * 0.48, 0.20);
-			}
-			double minX = effectBounds.minX() + 0.5;
-			double minY = effectBounds.minY() + 0.25;
-			double minZ = effectBounds.minZ() + 0.5;
-			double maxX = effectBounds.maxX() + 0.5;
-			double maxY = effectBounds.maxY() + 1.1;
-			double maxZ = effectBounds.maxZ() + 0.5;
-			int xPoints = Math.min(28, pointsForDistance(maxX - minX) + 8);
-			int yPoints = Math.min(28, pointsForDistance(maxY - minY) + 8);
-			int zPoints = Math.min(28, pointsForDistance(maxZ - minZ) + 8);
-			spawnEdgeLine(level, ParticleTypes.END_ROD, minX, minY, minZ, maxX, minY, minZ, xPoints);
-			spawnEdgeLine(level, ParticleTypes.END_ROD, minX, minY, maxZ, maxX, minY, maxZ, xPoints);
-			spawnEdgeLine(level, ParticleTypes.END_ROD, minX, maxY, minZ, maxX, maxY, minZ, xPoints);
-			spawnEdgeLine(level, ParticleTypes.END_ROD, minX, maxY, maxZ, maxX, maxY, maxZ, xPoints);
-			spawnEdgeLine(level, ParticleTypes.ELECTRIC_SPARK, minX, minY, minZ, minX, minY, maxZ, zPoints);
-			spawnEdgeLine(level, ParticleTypes.ELECTRIC_SPARK, maxX, minY, minZ, maxX, minY, maxZ, zPoints);
-			spawnEdgeLine(level, ParticleTypes.ELECTRIC_SPARK, minX, maxY, minZ, minX, maxY, maxZ, zPoints);
-			spawnEdgeLine(level, ParticleTypes.ELECTRIC_SPARK, maxX, maxY, minZ, maxX, maxY, maxZ, zPoints);
-			spawnEdgeLine(level, ParticleTypes.ELECTRIC_SPARK, minX, minY, minZ, minX, maxY, minZ, yPoints);
-			spawnEdgeLine(level, ParticleTypes.ELECTRIC_SPARK, maxX, minY, minZ, maxX, maxY, minZ, yPoints);
-			spawnEdgeLine(level, ParticleTypes.ELECTRIC_SPARK, minX, minY, maxZ, minX, maxY, maxZ, yPoints);
-			spawnEdgeLine(level, ParticleTypes.ELECTRIC_SPARK, maxX, minY, maxZ, maxX, maxY, maxZ, yPoints);
-			level.playSound(null, center, SoundEvents.END_PORTAL_SPAWN, SoundSource.BLOCKS, 1.2f, 1.35f);
-			level.playSound(null, center, SoundEvents.TRIDENT_THUNDER.value(), SoundSource.BLOCKS, 1.0f, 1.85f);
-			level.playSound(null, center, SoundEvents.BEACON_DEACTIVATE, SoundSource.BLOCKS, 0.9f, 0.55f);
-
-			int sampleCount = Math.min(260, totalBlocks);
-			if (sampleCount <= 0) {
-				return;
-			}
-			int stride = Math.max(1, totalBlocks / sampleCount);
-			for (int index = 0, spawned = 0; index < totalBlocks && spawned < sampleCount; index += stride, spawned++) {
-				GrandPalaceBlueprint.RelativeBlock block = blockAt(index);
-				BlockPos pos = transform(origin, facing, block);
-				if (!level.isInWorldBounds(pos)) {
-					continue;
+				case RIFT_BLOOM -> {
+					level.playSound(null, center, SoundEvents.END_PORTAL_SPAWN, SoundSource.BLOCKS, 1.05f, 0.82f);
+					level.playSound(null, center, SoundEvents.ILLUSIONER_CAST_SPELL, SoundSource.BLOCKS, 1.0f, 0.55f);
 				}
-				double x = pos.getX() + 0.5;
-				double y = pos.getY() + 0.65;
-				double z = pos.getZ() + 0.5;
-				level.sendParticles(ParticleTypes.ELECTRIC_SPARK, x, y, z, 2, 0.22, 0.25, 0.22, 0.08);
-				if ((spawned & 1) == 0) {
-					level.sendParticles(ParticleTypes.END_ROD, x, y + 0.25, z, 1, 0.10, 0.16, 0.10, 0.02);
+				case METEOR_FORGE -> {
+					level.playSound(null, center, SoundEvents.GENERIC_EXPLODE.value(), SoundSource.BLOCKS, 1.15f, 0.72f);
+					level.playSound(null, center, SoundEvents.ANVIL_LAND, SoundSource.BLOCKS, 1.0f, 0.45f);
+				}
+				default -> {
+					level.playSound(null, center, SoundEvents.TRIDENT_THUNDER.value(), SoundSource.BLOCKS, 1.0f, 1.85f);
+					level.playSound(null, center, SoundEvents.BEACON_DEACTIVATE, SoundSource.BLOCKS, 0.9f, 0.55f);
 				}
 			}
-		}
-
-		private void spawnRiftRevealBurst(ServerLevel level) {
-			double centerX = (effectBounds.minX() + effectBounds.maxX()) * 0.5 + 0.5;
-			double centerZ = (effectBounds.minZ() + effectBounds.maxZ()) * 0.5 + 0.5;
-			double minY = effectBounds.minY() + 0.35;
-			double maxY = Math.min(level.getMaxY() - 2.0, effectBounds.maxY() + 5.0);
-			double height = Math.max(4.0, maxY - minY);
-			BlockPos center = BlockPos.containing(centerX, minY + height * 0.45, centerZ);
-
-			for (int i = 0; i < 8; i++) {
-				double y = minY + height * (i / 7.0);
-				double radius = 1.6 + i * 0.75;
-				spawnParticleRing(level, i % 2 == 0 ? ParticleTypes.REVERSE_PORTAL : ParticleTypes.WITCH, centerX, y, centerZ, radius, 42, i * 0.35, 0.28);
-			}
-			level.sendParticles(ParticleTypes.SONIC_BOOM, centerX, minY + height * 0.55, centerZ, 1, 0.0, 0.0, 0.0, 0.0);
-			level.sendParticles(ParticleTypes.EXPLOSION, centerX, minY + height * 0.55, centerZ, 1, 0.0, 0.0, 0.0, 0.0);
-			level.sendParticles(ParticleTypes.REVERSE_PORTAL, centerX, minY + height * 0.50, centerZ, 220, 4.5, height * 0.38, 4.5, 0.20);
-			level.sendParticles(ParticleTypes.ELECTRIC_SPARK, centerX, minY + height * 0.50, centerZ, 140, 5.0, height * 0.35, 5.0, 0.22);
-
-			double minX = effectBounds.minX() + 0.5;
-			double boxMinY = effectBounds.minY() + 0.25;
-			double minZ = effectBounds.minZ() + 0.5;
-			double maxX = effectBounds.maxX() + 0.5;
-			double boxMaxY = effectBounds.maxY() + 1.1;
-			double maxZ = effectBounds.maxZ() + 0.5;
-			spawnBoxEdges(level, ParticleTypes.END_ROD, minX, boxMinY, minZ, maxX, boxMaxY, maxZ, 8);
-
-			level.playSound(null, center, SoundEvents.END_PORTAL_SPAWN, SoundSource.BLOCKS, 1.05f, 0.82f);
-			level.playSound(null, center, SoundEvents.ILLUSIONER_CAST_SPELL, SoundSource.BLOCKS, 1.0f, 0.55f);
-		}
-
-		private void spawnMeteorRevealBurst(ServerLevel level) {
-			double centerX = (effectBounds.minX() + effectBounds.maxX()) * 0.5 + 0.5;
-			double centerY = Math.min(level.getMaxY() - 2.0, effectBounds.maxY() + 1.8);
-			double centerZ = (effectBounds.minZ() + effectBounds.maxZ()) * 0.5 + 0.5;
-			double width = Math.max(1.0, effectBounds.maxX() - effectBounds.minX() + 1.0);
-			double depth = Math.max(1.0, effectBounds.maxZ() - effectBounds.minZ() + 1.0);
-			double radius = Math.max(4.0, Math.min(24.0, Math.max(width, depth) * 0.62));
-			BlockPos center = BlockPos.containing(centerX, centerY, centerZ);
-
-			level.sendParticles(ParticleTypes.EXPLOSION_EMITTER, centerX, centerY, centerZ, 1, 0.0, 0.0, 0.0, 0.0);
-			level.sendParticles(ParticleTypes.EXPLOSION, centerX, centerY, centerZ, 3, 1.2, 0.8, 1.2, 0.0);
-			level.sendParticles(ParticleTypes.FLAME, centerX, centerY, centerZ, 190, radius * 0.55, 2.5, radius * 0.55, 0.18);
-			level.sendParticles(ParticleTypes.LAVA, centerX, centerY, centerZ, 55, radius * 0.35, 1.4, radius * 0.35, 0.0);
-			level.sendParticles(ParticleTypes.LARGE_SMOKE, centerX, centerY + 1.4, centerZ, 90, radius * 0.42, 1.8, radius * 0.42, 0.06);
-			for (int ring = 0; ring < 6; ring++) {
-				spawnParticleRing(level, ring % 2 == 0 ? ParticleTypes.FLAME : ParticleTypes.ELECTRIC_SPARK, centerX, effectBounds.minY() + 0.55 + ring * 0.22, centerZ, radius * (0.34 + ring * 0.15), 58, ring * 0.27, 0.08);
-			}
-			spawnBoxEdges(level, ParticleTypes.FLAME, effectBounds.minX() + 0.5, effectBounds.minY() + 0.25, effectBounds.minZ() + 0.5, effectBounds.maxX() + 0.5, effectBounds.maxY() + 1.1, effectBounds.maxZ() + 0.5, 6);
-
-			level.playSound(null, center, SoundEvents.GENERIC_EXPLODE.value(), SoundSource.BLOCKS, 1.15f, 0.72f);
-			level.playSound(null, center, SoundEvents.ANVIL_LAND, SoundSource.BLOCKS, 1.0f, 0.45f);
-			level.playSound(null, center, SoundEvents.BLAZE_SHOOT, SoundSource.BLOCKS, 0.85f, 0.62f);
-		}
-
-		private void spawnBoxEdges(ServerLevel level, ParticleOptions particle, double minX, double minY, double minZ, double maxX, double maxY, double maxZ, int extraPoints) {
-			int xPoints = Math.min(32, pointsForDistance(maxX - minX) + extraPoints);
-			int yPoints = Math.min(32, pointsForDistance(maxY - minY) + extraPoints);
-			int zPoints = Math.min(32, pointsForDistance(maxZ - minZ) + extraPoints);
-			spawnEdgeLine(level, particle, minX, minY, minZ, maxX, minY, minZ, xPoints);
-			spawnEdgeLine(level, particle, minX, minY, maxZ, maxX, minY, maxZ, xPoints);
-			spawnEdgeLine(level, particle, minX, maxY, minZ, maxX, maxY, minZ, xPoints);
-			spawnEdgeLine(level, particle, minX, maxY, maxZ, maxX, maxY, maxZ, xPoints);
-			spawnEdgeLine(level, particle, minX, minY, minZ, minX, minY, maxZ, zPoints);
-			spawnEdgeLine(level, particle, maxX, minY, minZ, maxX, minY, maxZ, zPoints);
-			spawnEdgeLine(level, particle, minX, maxY, minZ, minX, maxY, maxZ, zPoints);
-			spawnEdgeLine(level, particle, maxX, maxY, minZ, maxX, maxY, maxZ, zPoints);
-			spawnEdgeLine(level, particle, minX, minY, minZ, minX, maxY, minZ, yPoints);
-			spawnEdgeLine(level, particle, maxX, minY, minZ, maxX, maxY, minZ, yPoints);
-			spawnEdgeLine(level, particle, minX, minY, maxZ, minX, maxY, maxZ, yPoints);
-			spawnEdgeLine(level, particle, maxX, minY, maxZ, maxX, maxY, maxZ, yPoints);
 		}
 
 		private GrandPalaceBlueprint.RelativeBlock blockAt(int index) {
@@ -2821,36 +2354,14 @@ public final class AnimatedBuildManager {
 		}
 
 		private void finishEffects(ServerLevel level) {
-			if (effectMode == BuildEffectMode.STANDARD || effectMode == BuildEffectMode.RIFT_BLOOM || effectMode == BuildEffectMode.METEOR_FORGE) {
-				return;
-			}
-
-			double centerX = (effectBounds.minX() + effectBounds.maxX()) * 0.5 + 0.5;
-			double centerY = Math.min(level.getMaxY() - 2.0, effectBounds.maxY() + 4.0);
-			double centerZ = (effectBounds.minZ() + effectBounds.maxZ()) * 0.5 + 0.5;
+			BlockPos center = effectCenter(level);
 			if (effectMode == BuildEffectMode.CLOCKWORK_GRID) {
-				for (int ring = 0; ring < 5; ring++) {
-					spawnParticleRing(level, ring % 2 == 0 ? ParticleTypes.ELECTRIC_SPARK : ParticleTypes.CRIT, centerX, centerY - ring * 0.45, centerZ, 2.4 + ring * 1.45, 48, ring * 0.38, 0.10);
-				}
-				level.sendParticles(ParticleTypes.END_ROD, centerX, centerY, centerZ, 70, 3.6, 1.8, 3.6, 0.08);
-				level.playSound(null, BlockPos.containing(centerX, centerY, centerZ), SoundEvents.COPPER_BULB_TURN_ON, SoundSource.BLOCKS, 0.8f, 1.65f);
-				level.playSound(null, BlockPos.containing(centerX, centerY, centerZ), SoundEvents.ANVIL_USE, SoundSource.BLOCKS, 0.55f, 1.15f);
-				return;
+				level.playSound(null, center, SoundEvents.COPPER_BULB_TURN_ON, SoundSource.BLOCKS, 0.8f, 1.65f);
+				level.playSound(null, center, SoundEvents.ANVIL_USE, SoundSource.BLOCKS, 0.55f, 1.15f);
+			} else if (effectMode == BuildEffectMode.AURORA_WEAVE) {
+				level.playSound(null, center, SoundEvents.AMETHYST_BLOCK_RESONATE, SoundSource.BLOCKS, 0.8f, 1.75f);
+				level.playSound(null, center, SoundEvents.ALLAY_ITEM_TAKEN, SoundSource.BLOCKS, 0.55f, 1.35f);
 			}
-			if (effectMode == BuildEffectMode.AURORA_WEAVE) {
-				level.sendParticles(ParticleTypes.GLOW, centerX, centerY, centerZ, 120, 5.5, 3.2, 5.5, 0.04);
-				level.sendParticles(ParticleTypes.ENCHANT, centerX, centerY - 1.2, centerZ, 110, 4.4, 2.4, 4.4, 0.06);
-				level.playSound(null, BlockPos.containing(centerX, centerY, centerZ), SoundEvents.AMETHYST_BLOCK_RESONATE, SoundSource.BLOCKS, 0.8f, 1.75f);
-				level.playSound(null, BlockPos.containing(centerX, centerY, centerZ), SoundEvents.ALLAY_ITEM_TAKEN, SoundSource.BLOCKS, 0.55f, 1.35f);
-				return;
-			}
-
-			level.sendParticles(ParticleTypes.EXPLOSION, centerX, centerY, centerZ, 1, 0.0, 0.0, 0.0, 0.0);
-			level.sendParticles(ParticleTypes.EXPLOSION_EMITTER, centerX, centerY, centerZ, 1, 0.0, 0.0, 0.0, 0.0);
-			level.sendParticles(ParticleTypes.END_ROD, centerX, centerY, centerZ, 80, 4.0, 2.0, 4.0, 0.10);
-			level.sendParticles(ParticleTypes.ELECTRIC_SPARK, centerX, centerY, centerZ, 90, 5.5, 2.5, 5.5, 0.18);
-			level.playSound(null, BlockPos.containing(centerX, centerY, centerZ), SoundEvents.END_PORTAL_SPAWN, SoundSource.BLOCKS, 0.9f, 1.25f);
-			level.playSound(null, BlockPos.containing(centerX, centerY, centerZ), SoundEvents.BEACON_ACTIVATE, SoundSource.BLOCKS, 1.0f, 1.4f);
 		}
 
 		private PlacementResult placeBlock(ServerLevel level, GrandPalaceBlueprint.RelativeBlock block, int progressIndex, GrandBuilderConfig config) {
@@ -2876,17 +2387,8 @@ public final class AnimatedBuildManager {
 			level.setBlock(targetPos, rotatedState, 2);
 			applyBlockEntityData(level, targetPos, rotatedState, block.blockEntityNbt());
 
-			if (!instantRevealPlacement || !effectMode.instantReveal()) {
-				switch (effectMode) {
-					case UFO_INVASION -> spawnUfoPlacementEffect(level, targetPos, progressIndex);
-					case CLOCKWORK_GRID -> spawnClockworkPlacementEffect(level, targetPos, progressIndex);
-					case AURORA_WEAVE -> spawnAuroraPlacementEffect(level, targetPos, progressIndex);
-					default -> {
-						if ((progressIndex & 7) == 0) {
-							level.sendParticles(ParticleTypes.END_ROD, targetPos.getX() + 0.5, targetPos.getY() + 0.5, targetPos.getZ() + 0.5, 1, 0.25, 0.25, 0.25, 0.01);
-						}
-					}
-				}
+			if (effectMode == BuildEffectMode.STANDARD && (progressIndex & 7) == 0) {
+				level.sendParticles(ParticleTypes.END_ROD, targetPos.getX() + 0.5, targetPos.getY() + 0.5, targetPos.getZ() + 0.5, 1, 0.25, 0.25, 0.25, 0.01);
 			}
 			if (effectMode == BuildEffectMode.STANDARD && (progressIndex % 24) == 0) {
 				level.playSound(null, targetPos, SoundEvents.AMETHYST_BLOCK_CHIME, SoundSource.BLOCKS, 0.25f, 1.20f);
@@ -2895,57 +2397,6 @@ public final class AnimatedBuildManager {
 			return PlacementResult.PLACED;
 		}
 
-		private void spawnUfoPlacementEffect(ServerLevel level, BlockPos targetPos, int progressIndex) {
-			double x = targetPos.getX() + 0.5;
-			double y = targetPos.getY() + 0.62;
-			double z = targetPos.getZ() + 0.5;
-			level.sendParticles(ParticleTypes.ELECTRIC_SPARK, x, y, z, 2, 0.30, 0.25, 0.30, 0.04);
-			if ((progressIndex & 1) == 0) {
-				level.sendParticles(ParticleTypes.REVERSE_PORTAL, x, y, z, 2, 0.20, 0.20, 0.20, 0.03);
-			}
-			if ((progressIndex % 6) == 0) {
-				level.sendParticles(ParticleTypes.ENCHANT, x, y + 0.15, z, 3, 0.22, 0.18, 0.22, 0.01);
-			}
-			if ((progressIndex % 14) == 0) {
-				level.playSound(null, targetPos, SoundEvents.ILLUSIONER_CAST_SPELL, SoundSource.BLOCKS, 0.35f, 1.55f);
-			}
-			if ((progressIndex % 48) == 0) {
-				level.sendParticles(ParticleTypes.EXPLOSION, x, y + 0.6, z, 1, 0.0, 0.0, 0.0, 0.0);
-				level.playSound(null, targetPos, SoundEvents.AMETHYST_BLOCK_RESONATE, SoundSource.BLOCKS, 0.55f, 1.8f);
-			}
-		}
-
-		private void spawnClockworkPlacementEffect(ServerLevel level, BlockPos targetPos, int progressIndex) {
-			double x = targetPos.getX() + 0.5;
-			double y = targetPos.getY() + 0.55;
-			double z = targetPos.getZ() + 0.5;
-			level.sendParticles(ParticleTypes.ELECTRIC_SPARK, x, y, z, 2, 0.20, 0.18, 0.20, 0.03);
-			if ((progressIndex & 3) == 0) {
-				spawnParticleRing(level, ParticleTypes.CRIT, x, y + 0.18, z, 0.62, 10, progressIndex * 0.17, 0.04);
-			}
-			if ((progressIndex % 18) == 0) {
-				level.playSound(null, targetPos, SoundEvents.COPPER_BULB_TURN_ON, SoundSource.BLOCKS, 0.28f, 1.35f);
-			}
-			if ((progressIndex % 54) == 0) {
-				level.playSound(null, targetPos, SoundEvents.ANVIL_USE, SoundSource.BLOCKS, 0.20f, 1.65f);
-			}
-		}
-
-		private void spawnAuroraPlacementEffect(ServerLevel level, BlockPos targetPos, int progressIndex) {
-			double x = targetPos.getX() + 0.5;
-			double y = targetPos.getY() + 0.70;
-			double z = targetPos.getZ() + 0.5;
-			level.sendParticles(ParticleTypes.GLOW, x, y, z, 2, 0.22, 0.20, 0.22, 0.0);
-			if ((progressIndex & 1) == 0) {
-				level.sendParticles(ParticleTypes.ENCHANT, x, y + 0.35, z, 2, 0.18, 0.45, 0.18, 0.02);
-			}
-			if ((progressIndex % 11) == 0) {
-				level.sendParticles(ParticleTypes.END_ROD, x, y + 0.15, z, 1, 0.18, 0.25, 0.18, 0.01);
-			}
-			if ((progressIndex % 30) == 0) {
-				level.playSound(null, targetPos, SoundEvents.AMETHYST_BLOCK_CHIME, SoundSource.BLOCKS, 0.22f, 1.75f);
-			}
-		}
 
 		private static boolean isTerrainOperation(int stage) {
 			return stage >= TERRAIN_FILL_STAGE_BASE;

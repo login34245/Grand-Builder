@@ -63,6 +63,23 @@ java {
 	targetCompatibility = JavaVersion.VERSION_21
 }
 
+sourceSets {
+	geometryTest {
+		compileClasspath += sourceSets.main.output + sourceSets.client.output + sourceSets.client.compileClasspath
+		runtimeClasspath += output + compileClasspath + sourceSets.client.runtimeClasspath
+	}
+}
+
+tasks.register('verifyEffectGeometry', JavaExec) {
+	dependsOn geometryTestClasses
+	classpath = sourceSets.geometryTest.runtimeClasspath
+	mainClass = 'dev.grandbuilder.client.EffectGeometryTest'
+}
+
+tasks.named('check') {
+	dependsOn verifyEffectGeometry
+}
+
 jar {
 	inputs.property "archivesName", project.base.archivesName
 

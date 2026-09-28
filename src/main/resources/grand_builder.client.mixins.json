@@ -1,0 +1,12 @@
+{
+  "required": true,
+  "package": "dev.grandbuilder.client.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "CameraEffectsMixin",
+    "RenderTypeAccess"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
