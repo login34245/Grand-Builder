@@ -209,7 +209,7 @@ public final class GrandBuilderClientEffects {
 				}
 				if (scene.actor != null) {
 					scene.actor.previousAge = scene.actor.age;
-					scene.actor.age = Math.min(scene.actor.age + 1, scene.actor.payload.duration());
+					scene.actor.age = Math.min(scene.actor.age + 1, scene.actor.payload.duration() + HerobrineTiming.RECOVERY_TICKS);
 				}
 				scene.ghosts.removeIf(actor -> ++actor.ghostAge >= 6);
 				scene.bolts.removeIf(bolt -> {
@@ -266,10 +266,10 @@ public final class GrandBuilderClientEffects {
 
 	private static ActorFrame actorFrame(Actor actor, float partialTick, float opacity, boolean ghost) {
 		HerobrinePlacementPayload p = actor.payload;
-		int duration = Math.max(1, Math.min(24, p.duration()));
+		int duration = Math.max(1, Math.min(HerobrineTiming.MAX_WINDUP_TICKS, p.duration()));
 		return new ActorFrame(p.x(), p.y(), p.z(), p.target().getX() + 0.5 - p.x(),
 			p.target().getY() + 0.5 - p.y(), p.target().getZ() + 0.5 - p.z(),
-			lerp(actor.previousAge, actor.age, partialTick), duration, HerobrineTiming.contactTick(duration),
+			lerp(actor.previousAge, actor.age, partialTick), duration + HerobrineTiming.RECOVERY_TICKS, HerobrineTiming.contactTick(duration),
 			actor.blockColor, opacity, ghost, p.dismantling());
 	}
 

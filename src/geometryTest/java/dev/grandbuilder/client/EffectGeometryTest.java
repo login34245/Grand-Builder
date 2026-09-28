@@ -1,6 +1,8 @@
 package dev.grandbuilder.client;
 
 import dev.grandbuilder.build.BuildEffectMode;
+import dev.grandbuilder.build.BuildCadence;
+import dev.grandbuilder.build.BuildSpeed;
 import dev.grandbuilder.build.HerobrineTiming;
 import dev.grandbuilder.build.BuildStartSide;
 import dev.grandbuilder.build.BuildOptions;
@@ -45,23 +47,19 @@ public final class EffectGeometryTest {
 		int bolts = verifyLightning();
 		verifyOptions();
 		verifyBuildDirections();
+		verifyCadence();
 		check(BuildEffectMode.AURORA_WEAVE.networkId() == 5 && BuildEffectMode.HEROBRINE.networkId() == 6
 			&& BuildEffectMode.BUILDER_CHARGE.networkId() == 7, "Existing mode IDs changed");
 		check(BuildEffectMode.BUILDER_CHARGE.hidesSpeed() && !BuildEffectMode.HEROBRINE.hidesSpeed(), "Wrong speed controls");
-		System.out.println("Effect geometry verified: " + samples + " scenes, " + actors + " actors, " + bolts + " bolts; doubled cadence and mode options verified.");
+		System.out.println("Effect geometry verified: " + samples + " scenes, " + actors + " actors, " + bolts + " bolts; standard cadence and mode options verified.");
 	}
 
 	private static int verifyHerobrine() {
 		int samples = 0;
-		int previousDuration = 25;
-		for (double rate : new double[] {0.125, 0.25, 1, 2, 6, 14, 28, 64, 96, 160, 256, 512}) {
-			int duration = HerobrineTiming.cycleTicks(rate);
-			check(duration >= 1 && duration <= previousDuration, "Invalid placement cadence");
-			check(duration+HerobrineTiming.cycleTicks(rate,1)==HerobrineTiming.originalCycleTicks(rate),"Herobrine is not exactly twice as fast");
-			check(HerobrineTiming.estimateTicks(36,rate,0)*2==36L*HerobrineTiming.originalCycleTicks(rate),"Wrong doubled ETA");
-			previousDuration = duration;
-			int contact = HerobrineTiming.contactTick(duration);
-			check(contact > 0 && contact <= duration, "Contact outside animation");
+		for (int cycleDuration : new int[] {1,2,4,8,24}) {
+			int duration = cycleDuration + 3;
+			int contact = HerobrineTiming.contactTick(cycleDuration);
+			check(contact == cycleDuration && contact < duration, "Contact must match the build cycle, not the visual tail");
 			for (double[] target : new double[][] {{1.15, 0.5, 0}, {-1.15, 0.5, 0}, {0, 0.5, 1.15}, {0, 0.5, -1.15}}) {
 				for (float age : new float[] {0, 0.5f, contact - 0.25f, contact, duration}) {
 					Stats stats = actorSample(target, age, duration, contact, 1, false);
@@ -79,6 +77,27 @@ public final class EffectGeometryTest {
 			}
 		}
 		return samples;
+	}
+
+	private static void verifyCadence() {
+		for (BuildSpeed speed : BuildSpeed.values()) for(int limit : new int[] {7,512}) {
+			int budget = Math.min(limit,speed.defaultBlocksPerCycle());
+			int delay = speed.defaultTickDelay();
+			check(BuildCadence.budget(speed.defaultBlocksPerCycle(),limit)==budget,"Wrong per-cycle budget");
+			for(int count : new int[] {1,36,513}) {
+				int remaining=count,elapsed=0,ticks=0;
+				long estimate=BuildCadence.estimateTicks(count,speed.defaultBlocksPerCycle(),delay,limit,0);
+				while(remaining>0) {
+					ticks++;
+					if(++elapsed==delay) { remaining=Math.max(0,remaining-budget); elapsed=0; }
+					check(estimate-ticks==BuildCadence.estimateTicks(remaining,speed.defaultBlocksPerCycle(),delay,limit,elapsed),
+						"Countdown disagrees with standard placement: "+speed);
+				}
+			}
+		}
+		check(BuildCadence.estimateTicks(23546,512,1,512,0)==46,"Insane speed is not 512 blocks per tick");
+		check(BuildCadence.estimateTicks(Integer.MAX_VALUE,1,40,512,0)==Integer.MAX_VALUE*40L,"ETA overflow");
+		check(BuildCadence.estimateTicks(0,512,1,512,0)==0,"Completed build has nonzero ETA");
 	}
 
 	private static int verifyLightning() {

@@ -36,7 +36,7 @@ public enum BuildSpeed {
 	}
 
 	public double effectiveBlocksPerTick() {
-		return blocksPerCycle() / (double) tickDelay();
+		return BuildCadence.budget(blocksPerCycle(), GrandBuilderConfig.get().maxBlocksPerTick) / (double) tickDelay();
 	}
 
 	public String displayRate() {

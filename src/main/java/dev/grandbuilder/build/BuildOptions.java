@@ -14,12 +14,10 @@ public record BuildOptions(BuildStartSide startSide, DismantleStyle dismantleSty
 	}
 
 	public double effectiveRate(BuildEffectMode mode, BuildSpeed speed) {
-		return mode == BuildEffectMode.DISMANTLE && dismantleStyle == DismantleStyle.CHARGE
-			? speed.effectiveBlocksPerTick() : visualMode(mode).effectiveRate(speed);
+		return visualMode(mode).effectiveRate(speed);
 	}
 
 	public String displayRate(BuildEffectMode mode, BuildSpeed speed) {
-		return mode == BuildEffectMode.DISMANTLE && dismantleStyle == DismantleStyle.CHARGE
-			? speed.displayRate() : visualMode(mode).displayRate(speed);
+		return visualMode(mode).displayRate(speed);
 	}
 }
