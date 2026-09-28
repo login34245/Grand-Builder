@@ -10,7 +10,10 @@ public enum BuildEffectMode {
 	CLOCKWORK_GRID("clockwork_grid", false, 0),
 	AURORA_WEAVE("aurora_weave", false, 0),
 	HEROBRINE("herobrine", false, 0),
-	BUILDER_CHARGE("builder_charge", true, 72);
+	BUILDER_CHARGE("builder_charge", true, 72),
+	LIGHTNING("lightning", false, 0),
+	REVERSE("reverse", false, 0),
+	DISMANTLE("dismantle", false, 0);
 
 	private final String key;
 	private final boolean instantReveal;
@@ -35,12 +38,16 @@ public enum BuildEffectMode {
 	}
 
 	public double effectiveRate(BuildSpeed speed) {
-		return this == HEROBRINE ? 1.0 / HerobrineTiming.cycleTicks(speed.effectiveBlocksPerTick())
-			: speed.effectiveBlocksPerTick();
+		return this == HEROBRINE ? 1.0 / HerobrineTiming.averageCycleTicks(speed.effectiveBlocksPerTick())
+			: this == LIGHTNING ? 1.0 / lightningCycleTicks(speed.effectiveBlocksPerTick()) : speed.effectiveBlocksPerTick();
 	}
 
 	public String displayRate(BuildSpeed speed) {
-		return this == HEROBRINE ? String.format(Locale.US, "%.2f", effectiveRate(speed)) : speed.displayRate();
+		return this == HEROBRINE || this == LIGHTNING ? String.format(Locale.US, "%.2f", effectiveRate(speed)) : speed.displayRate();
+	}
+
+	public static int lightningCycleTicks(double rate) {
+		return (int) Math.max(1, Math.min(16, Math.round(6.0 / Math.sqrt(Math.max(0.01, rate)))));
 	}
 
 	public int revealDelayTicks() {

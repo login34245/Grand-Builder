@@ -2,6 +2,9 @@ package dev.grandbuilder.client;
 
 import dev.grandbuilder.build.BuildEffectMode;
 import dev.grandbuilder.build.HerobrineTiming;
+import dev.grandbuilder.build.BuildStartSide;
+import dev.grandbuilder.build.BuildOptions;
+import dev.grandbuilder.build.DismantleStyle;
 import dev.grandbuilder.network.BuildEffectPayload;
 import java.util.Arrays;
 import java.util.HashSet;
@@ -12,13 +15,15 @@ public final class EffectGeometryTest {
 		Set<Long> shapes = new HashSet<>();
 		int samples = 0;
 		for (BuildEffectMode mode : BuildEffectMode.values()) {
-			if (mode == BuildEffectMode.STANDARD || mode == BuildEffectMode.HEROBRINE) continue;
+			if (mode == BuildEffectMode.STANDARD || mode == BuildEffectMode.HEROBRINE
+				|| mode == BuildEffectMode.LIGHTNING || mode == BuildEffectMode.DISMANTLE) continue;
 			for (double size : new double[] {1.0, 20.0, 256.0}) {
 				for (int phase : new int[] {BuildEffectPayload.PHASE_ARRIVAL, BuildEffectPayload.PHASE_BUILD,
 					BuildEffectPayload.PHASE_REVEAL, BuildEffectPayload.PHASE_PAUSED, BuildEffectPayload.PHASE_STOP}) {
 					for (float age : new float[] {0.0f, 0.5f, 12.25f, 27.5f, 54.0f, 240.0f}) {
 						Stats stats = sample(mode, phase, age, size, 1.0f);
-						check(stats.count > 100, "Missing geometry: " + mode);
+						boolean expired = mode == BuildEffectMode.BUILDER_CHARGE && phase == BuildEffectPayload.PHASE_REVEAL && age >= 28;
+						check(expired ? stats.count == 0 : stats.count > 100, "Missing geometry: " + mode);
 						check(stats.count < 20000, "Unbounded geometry: " + mode);
 						for (int count : stats.materialCounts) check(count % 4 == 0, "Incomplete quad");
 						samples++;
@@ -37,21 +42,26 @@ public final class EffectGeometryTest {
 		Stats standard = sample(BuildEffectMode.STANDARD, BuildEffectPayload.PHASE_BUILD, 20, 20, 1);
 		check(standard.count == 0, "Standard mode changed");
 		int actors = verifyHerobrine();
+		int bolts = verifyLightning();
+		verifyOptions();
+		verifyBuildDirections();
 		check(BuildEffectMode.AURORA_WEAVE.networkId() == 5 && BuildEffectMode.HEROBRINE.networkId() == 6
 			&& BuildEffectMode.BUILDER_CHARGE.networkId() == 7, "Existing mode IDs changed");
 		check(BuildEffectMode.BUILDER_CHARGE.hidesSpeed() && !BuildEffectMode.HEROBRINE.hidesSpeed(), "Wrong speed controls");
-		System.out.println("Effect geometry verified: " + samples + " scene samples, " + actors + " actor samples, 6 distinct moving scenes and a placement actor.");
+		System.out.println("Effect geometry verified: " + samples + " scenes, " + actors + " actors, " + bolts + " bolts; doubled cadence and mode options verified.");
 	}
 
 	private static int verifyHerobrine() {
 		int samples = 0;
 		int previousDuration = 25;
-		for (double rate : new double[] {0.125, 0.25, 1, 2, 6, 14, 28, 64, 512}) {
+		for (double rate : new double[] {0.125, 0.25, 1, 2, 6, 14, 28, 64, 96, 160, 256, 512}) {
 			int duration = HerobrineTiming.cycleTicks(rate);
-			check(duration >= 2 && duration <= previousDuration, "Invalid placement cadence");
+			check(duration >= 1 && duration <= previousDuration, "Invalid placement cadence");
+			check(duration+HerobrineTiming.cycleTicks(rate,1)==HerobrineTiming.originalCycleTicks(rate),"Herobrine is not exactly twice as fast");
+			check(HerobrineTiming.estimateTicks(36,rate,0)*2==36L*HerobrineTiming.originalCycleTicks(rate),"Wrong doubled ETA");
 			previousDuration = duration;
 			int contact = HerobrineTiming.contactTick(duration);
-			check(contact > 0 && contact < duration, "Contact outside animation");
+			check(contact > 0 && contact <= duration, "Contact outside animation");
 			for (double[] target : new double[][] {{1.15, 0.5, 0}, {-1.15, 0.5, 0}, {0, 0.5, 1.15}, {0, 0.5, -1.15}}) {
 				for (float age : new float[] {0, 0.5f, contact - 0.25f, contact, duration}) {
 					Stats stats = actorSample(target, age, duration, contact, 1, false);
@@ -71,6 +81,40 @@ public final class EffectGeometryTest {
 		return samples;
 	}
 
+	private static int verifyLightning() {
+		int count=0;
+		for(int sequence : new int[] {0,1,27,512}) for(int duration : new int[] {1,2,8,16}) {
+			int contact=HerobrineTiming.contactTick(duration);
+			for(float age : new float[] {0.5f,contact,contact+0.5f,contact+3,contact+5}) {
+				Stats stats=new Stats();
+				EffectGeometry.emitLightning(new GrandBuilderClientEffects.BoltFrame(0,64,0,sequence,age,contact,1,false),stats::accept);
+				check(stats.count<4000,"Unbounded lightning");
+				for(int vertices:stats.materialCounts) check(vertices%4==0,"Incomplete lightning quad");
+				if(age==contact) {
+					check(stats.count>500,"Missing strike geometry");
+					for(int axis=0;axis<3;axis++) check(stats.max[axis]-stats.min[axis]>1,"Flat strike");
+				}
+				if(age==contact+5) check(stats.maxAlpha==0,"Strike does not fade");
+				count++;
+			}
+		}
+		return count;
+	}
+
+	private static void verifyOptions() {
+		check(BuildStartSide.values().length==5,"Unexpected bottom build option");
+		BuildOptions options=new BuildOptions(BuildStartSide.RIGHT,DismantleStyle.HEROBRINE,true);
+		check(!options.normalized(BuildEffectMode.DISMANTLE).destructiveExplosion(),"Destructive dismantle leaked");
+		check(options.normalized(BuildEffectMode.STANDARD).equals(BuildOptions.DEFAULT),"Hidden settings leaked");
+		check(options.normalized(BuildEffectMode.REVERSE).startSide()==BuildStartSide.RIGHT,"Build side lost");
+		check(options.normalized(BuildEffectMode.BUILDER_CHARGE).destructiveExplosion(),"Explosion option lost");
+		check(options.normalized(BuildEffectMode.DISMANTLE).visualMode(BuildEffectMode.DISMANTLE)==BuildEffectMode.HEROBRINE,"Wrong removal actor");
+		Stats before=new Stats(),after=new Stats();
+		EffectGeometry.emitHerobrine(new GrandBuilderClientEffects.ActorFrame(0,64,0,1.15,0.5,0,0.75f,3,1,0xC9A36A,1,false,true),before::accept);
+		EffectGeometry.emitHerobrine(new GrandBuilderClientEffects.ActorFrame(0,64,0,1.15,0.5,0,1,3,1,0xC9A36A,1,false,true),after::accept);
+		check(after.materialCounts[0]-before.materialCounts[0]==24,"Removed block not taken into hand");
+	}
+
 	private static Stats actorSample(double[] target, float age, int duration, int contact, float opacity, boolean ghost) {
 		Stats stats = new Stats();
 		EffectGeometry.emitHerobrine(new GrandBuilderClientEffects.ActorFrame(0, 64, 0, target[0], target[1], target[2],
@@ -78,10 +122,38 @@ public final class EffectGeometryTest {
 		return stats;
 	}
 
+	private static void verifyBuildDirections() {
+		for (int facing : new int[] {2,5,3,4}) for (BuildStartSide side : BuildStartSide.values()) {
+			double width = 20, depth = 16;
+			boolean swapped = facing == 5 || facing == 4;
+			double dx = side == BuildStartSide.LEFT ? width+0.24 : side == BuildStartSide.RIGHT ? -width-0.24 : 0;
+			double dy = side == BuildStartSide.TOP ? -8 : 0;
+			double dz = side == BuildStartSide.FRONT ? depth+0.24 : side == BuildStartSide.BACK ? -depth-0.24 : 0;
+			double[] expected = switch(facing) {
+				case 5 -> new double[] {-dz,dy,dx};
+				case 3 -> new double[] {-dx,dy,-dz};
+				case 4 -> new double[] {dz,dy,-dx};
+				default -> new double[] {dx,dy,dz};
+			};
+			double[][] centers = new double[2][3];
+			for(int step=0;step<2;step++) {
+				int[] count={0};
+				double[] sum=centers[step];
+				EffectGeometry.emit(new GrandBuilderClientEffects.Frame(BuildEffectMode.REVERSE,BuildEffectPayload.PHASE_BUILD,
+					20,20,240,step,1,0,64,0,swapped?depth:width,8,swapped?width:depth,false,side.ordinal()+facing*8,false),
+					(material,x,y,z,color)->{ if((color&0xFFFFFF)==0x8FFFF2){sum[0]+=x;sum[1]+=y;sum[2]+=z;count[0]++;} });
+				check(count[0]>0,"Missing direction plane");
+				for(int axis=0;axis<3;axis++) sum[axis]/=count[0];
+			}
+			for(int axis=0;axis<3;axis++) check(Math.abs(centers[1][axis]-centers[0][axis]-expected[axis])<0.02,
+				"Direction plane disagrees with block order: facing="+facing+" side="+side);
+		}
+	}
+
 	private static Stats sample(BuildEffectMode mode, int phase, float age, double size, float opacity) {
 		Stats stats = new Stats();
 		EffectGeometry.emit(new GrandBuilderClientEffects.Frame(mode, phase, age, age,
-			phase == BuildEffectPayload.PHASE_REVEAL ? 28 : 240, 0.5f, opacity,
+			phase == BuildEffectPayload.PHASE_REVEAL ? 28 : 240, mode==BuildEffectMode.REVERSE?Math.min(1,age/240):0.5f, opacity,
 			0, 64, 0, size, size * 0.75, size * 0.8), stats::accept);
 		return stats;
 	}

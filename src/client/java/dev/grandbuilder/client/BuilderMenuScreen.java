@@ -2,11 +2,16 @@ package dev.grandbuilder.client;
 
 import dev.grandbuilder.build.BuildSpeed;
 import dev.grandbuilder.build.BuildEffectMode;
+import dev.grandbuilder.build.BuildOptions;
+import dev.grandbuilder.build.BuildStartSide;
+import dev.grandbuilder.build.DismantleStyle;
 import dev.grandbuilder.build.CustomCaptureFormat;
 import dev.grandbuilder.build.StructureLibrary;
 import dev.grandbuilder.network.BuildControlAction;
 import dev.grandbuilder.network.BuildControlPayload;
 import dev.grandbuilder.network.BuildRequestPayload;
+import dev.grandbuilder.network.BuildEstimateRequestPayload;
+import dev.grandbuilder.network.BuildEstimatePayload;
 import dev.grandbuilder.network.BuildSetSpeedPayload;
 import dev.grandbuilder.network.CaptureRequestPayload;
 import java.nio.file.Path;
@@ -17,12 +22,14 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.screens.ConfirmScreen;
+import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.Util;
 
 public class BuilderMenuScreen extends Screen {
 	private static final int PANEL_WIDTH = 346;
-	private static final int PANEL_HEIGHT = 316;
+	private static final int PANEL_HEIGHT = 356;
 	private static final int MIN_PANEL_WIDTH = 220;
 	private static final int MIN_PANEL_HEIGHT = 190;
 	private static final int SCREEN_MARGIN = 6;
@@ -33,18 +40,27 @@ public class BuilderMenuScreen extends Screen {
 	private static String lastStructureKey = StructureLibrary.defaultSelectionEntry().key();
 	private static BuildSpeed lastSpeed = BuildSpeed.NORMAL;
 	private static BuildEffectMode lastEffectMode = BuildEffectMode.STANDARD;
+	private static BuildOptions lastOptions = BuildOptions.DEFAULT;
+	private static int nextEstimateRequestId;
 	private static CustomCaptureFormat lastCaptureFormat = CustomCaptureFormat.SCHEM_SINGLE;
 
 	private List<StructureLibrary.SelectionEntry> structureChoices = new ArrayList<>();
 	private int selectedStructureIndex;
 	private BuildSpeed selectedSpeed = lastSpeed;
 	private BuildEffectMode selectedEffectMode = lastEffectMode;
+	private BuildOptions selectedOptions = new BuildOptions(lastOptions.startSide(), lastOptions.dismantleStyle(), false);
+	private BuildEstimatePayload estimate;
+	private BuildRequestPayload estimateSelection;
+	private int estimateRequestId;
+	private int estimateDelay;
+	private int estimateWaitTicks;
 	private CustomCaptureFormat selectedCaptureFormat = lastCaptureFormat;
 	private Button structureButton;
 	private Button folderButton;
 	private Button speedButton;
 	private Button terrainButton;
 	private Button effectButton;
+	private Button optionsButton;
 	private Button captureFormatButton;
 	private Button startButton;
 	private Button captureButton;
@@ -76,6 +92,8 @@ public class BuilderMenuScreen extends Screen {
 		int speedButtonY,
 		int effectLabelY,
 		int effectButtonY,
+		int optionsButtonY,
+		int etaY,
 		int captureLabelY,
 		int captureButtonY,
 		int actionsButtonY,
@@ -138,10 +156,18 @@ public class BuilderMenuScreen extends Screen {
 
 		this.effectButton = this.addRenderableWidget(Button.builder(fitButtonMessage(effectMessage(), layout.contentWidth()), button -> {
 			this.selectedEffectMode = this.selectedEffectMode.next();
+			this.selectedOptions = new BuildOptions(selectedOptions.startSide(), selectedOptions.dismantleStyle(), false);
 			lastEffectMode = this.selectedEffectMode;
 			setFittedMessage(this.effectButton, effectMessage());
 			updateEffectDependentControls();
 		}).bounds(layout.innerLeft(), layout.effectButtonY(), layout.contentWidth(), layout.buttonHeight()).build());
+		this.optionsButton = this.addRenderableWidget(Button.builder(optionsMessage(), button -> {
+			if (selectedEffectMode == BuildEffectMode.REVERSE) selectedOptions = new BuildOptions(selectedOptions.startSide().next(), selectedOptions.dismantleStyle(), false);
+			else if (selectedEffectMode == BuildEffectMode.DISMANTLE) selectedOptions = new BuildOptions(selectedOptions.startSide(), selectedOptions.dismantleStyle().next(), false);
+			else if (selectedEffectMode == BuildEffectMode.BUILDER_CHARGE) selectedOptions = new BuildOptions(selectedOptions.startSide(), selectedOptions.dismantleStyle(), !selectedOptions.destructiveExplosion());
+			lastOptions = selectedOptions;
+			refreshButtonMessages();
+		}).bounds(layout.innerLeft(), layout.optionsButtonY(), layout.contentWidth(), layout.buttonHeight()).build());
 
 		this.captureFormatButton = this.addRenderableWidget(Button.builder(fitButtonMessage(captureFormatMessage(), layout.contentWidth()), button -> {
 			this.selectedCaptureFormat = this.selectedCaptureFormat.next();
@@ -189,34 +215,39 @@ public class BuilderMenuScreen extends Screen {
 
 		int left = Math.max((this.width - panelWidth) / 2, Math.min(SCREEN_MARGIN, Math.max(0, this.width - panelWidth)));
 		int top = Math.max((this.height - panelHeight) / 2, Math.min(SCREEN_MARGIN, Math.max(0, this.height - panelHeight)));
-		boolean compact = panelWidth < PANEL_WIDTH || panelHeight < PANEL_HEIGHT;
+		boolean compact = panelWidth < PANEL_WIDTH || panelHeight < 310;
 		boolean veryCompact = panelHeight < 245;
 		int innerMargin = panelWidth <= 260 ? 10 : compact ? 14 : 22;
 		int innerLeft = left + innerMargin;
 		int innerRight = left + panelWidth - innerMargin;
 		int contentWidth = Math.max(100, innerRight - innerLeft);
-		int buttonHeight = veryCompact ? 14 : compact ? 16 : 20;
-		int labelStep = veryCompact ? 8 : 10;
-		int rowGap = veryCompact ? 3 : compact ? 4 : 7;
-		int groupGap = veryCompact ? 5 : compact ? 6 : 10;
-		boolean showSubtitle = !veryCompact && panelWidth >= 280 && panelHeight >= 255;
-
-		int titleY = top + (showSubtitle ? 14 : 7);
-		int subtitleY = top + 28;
-		int y = top + (showSubtitle ? 47 : 25);
-		int topSeparatorY = y;
-		y += veryCompact ? 3 : 5;
-		int structureLabelY = y;
-		int structureButtonY = structureLabelY + labelStep;
+		int labelStep = panelHeight >= 250 ? 10 : panelHeight >= 210 ? 8 : 0;
+		int rowGap = panelHeight >= 310 ? 4 : 2;
+		int groupGap = rowGap;
+		boolean showSubtitle = false;
+		boolean showSpeed = !selectedEffectMode.hidesSpeed();
+		int rows = hasModeOptions() ? 8 : 7;
+		int footerHeight = panelHeight >= 310 ? 54 : 34;
+		int available = panelHeight - 35 - footerHeight - labelStep*(showSpeed ? 4 : 3) - rowGap*(rows+1);
+		int buttonHeight = Math.max(10, Math.min(20, available / rows));
+		int titleY = top + 5;
+		int subtitleY = top + 18;
+		int etaY = top + 18;
+		int topSeparatorY = top + 30;
+		int y = top + 35;
+		int structureLabelY = labelStep > 0 ? y : -100;
+		int structureButtonY = y + labelStep;
 		y = structureButtonY + buttonHeight + rowGap;
-		int speedLabelY = y;
-		int speedButtonY = speedLabelY + labelStep;
+		int speedLabelY = showSpeed && labelStep > 0 ? y : -100;
+		int speedButtonY = y + (showSpeed ? labelStep : 0);
 		y = speedButtonY + buttonHeight + rowGap;
-		int effectLabelY = y;
-		int effectButtonY = effectLabelY + labelStep;
+		int effectLabelY = labelStep > 0 ? y : -100;
+		int effectButtonY = y + labelStep;
 		y = effectButtonY + buttonHeight + rowGap;
-		int captureLabelY = y;
-		int captureButtonY = captureLabelY + labelStep;
+		int optionsButtonY = y;
+		if (hasModeOptions()) y += buttonHeight + rowGap;
+		int captureLabelY = labelStep > 0 ? y : -100;
+		int captureButtonY = y + labelStep;
 		y = captureButtonY + buttonHeight + groupGap;
 		int actionsButtonY = y;
 		y = actionsButtonY + buttonHeight + rowGap;
@@ -224,13 +255,12 @@ public class BuilderMenuScreen extends Screen {
 		y = pauseButtonY + buttonHeight + rowGap;
 		int cancelButtonY = y;
 		y = cancelButtonY + buttonHeight + groupGap;
-		int hintY = y;
-		y = hintY + (veryCompact ? 12 : 16);
-		int statusSeparatorY = Math.max(hintY + 10, y - 5);
-		int statusTitleY = y;
+		int hintY = -100;
+		int statusSeparatorY = y;
+		int statusTitleY = y + 4;
 		int statusModeY = statusTitleY + 10;
 		int statusStructureY = statusModeY + 10;
-		int statusProgressY = statusStructureY + 10;
+		int statusProgressY = statusModeY + (panelHeight >= 310 ? 20 : 10);
 		int statusEtaY = statusProgressY + 10;
 		int statusTerrainY = statusEtaY + 10;
 		int bottomLimit = top + panelHeight - 8;
@@ -271,6 +301,8 @@ public class BuilderMenuScreen extends Screen {
 			speedButtonY,
 			effectLabelY,
 			effectButtonY,
+			optionsButtonY,
+			etaY,
 			captureLabelY,
 			captureButtonY,
 			actionsButtonY,
@@ -292,9 +324,9 @@ public class BuilderMenuScreen extends Screen {
 			youtubeButtonLeft,
 			headerButtonTop,
 			showSubtitle,
-			statusStructureY <= bottomLimit,
-			statusEtaY <= bottomLimit,
-			statusTerrainY <= bottomLimit
+			panelHeight >= 310 && statusStructureY <= bottomLimit,
+			false,
+			false
 		);
 	}
 
@@ -323,6 +355,23 @@ public class BuilderMenuScreen extends Screen {
 	}
 
 	private void startBuild() {
+		if (selectedEffectMode == BuildEffectMode.BUILDER_CHARGE && selectedOptions.destructiveExplosion() && this.minecraft != null) {
+			this.minecraft.setScreen(new ConfirmScreen(confirmed -> {
+				if (confirmed) sendBuildRequest();
+				else this.minecraft.setScreen(this);
+			}, Component.translatable("screen.grand_builder.destructive_title"), Component.translatable("screen.grand_builder.destructive_warning")));
+			return;
+		}
+		sendBuildRequest();
+	}
+
+	private BuildRequestPayload selectionPayload() {
+		BuildOptions options = selectedOptions.normalized(selectedEffectMode);
+		return new BuildRequestPayload(currentSelection().key(), selectedSpeed.networkId(), selectedEffectMode.networkId(),
+			options.startSide().ordinal(), options.dismantleStyle().ordinal(), options.destructiveExplosion());
+	}
+
+	private void sendBuildRequest() {
 		StructureLibrary.SelectionEntry selected = currentSelection();
 		lastStructureKey = selected.key();
 		if (!selectedEffectMode.hidesSpeed()) {
@@ -330,7 +379,8 @@ public class BuilderMenuScreen extends Screen {
 		}
 		lastEffectMode = selectedEffectMode;
 
-		ClientPlayNetworking.send(new BuildRequestPayload(selected.key(), selectedSpeed.networkId(), selectedEffectMode.networkId()));
+		lastOptions = selectedOptions;
+		ClientPlayNetworking.send(selectionPayload());
 		PreviewConfirmState.arm();
 		this.onClose();
 	}
@@ -352,7 +402,7 @@ public class BuilderMenuScreen extends Screen {
 		return Component.translatable(
 			"screen.grand_builder.speed_value",
 			Component.translatable(selectedSpeed.translationKey()),
-			selectedEffectMode.displayRate(selectedSpeed)
+			selectedOptions.displayRate(selectedEffectMode, selectedSpeed)
 		);
 	}
 
@@ -412,6 +462,7 @@ public class BuilderMenuScreen extends Screen {
 		setFittedMessage(this.speedButton, speedMessage());
 		setFittedMessage(this.terrainButton, terrainMessage());
 		setFittedMessage(this.effectButton, effectMessage());
+		setFittedMessage(this.optionsButton, optionsMessage());
 		setFittedMessage(this.captureFormatButton, captureFormatMessage());
 		setFittedMessage(this.startButton, Component.translatable("screen.grand_builder.start"));
 		setFittedMessage(this.captureButton, Component.translatable("screen.grand_builder.capture"));
@@ -427,16 +478,39 @@ public class BuilderMenuScreen extends Screen {
 	private void updateEffectDependentControls() {
 		UiLayout layout = layout();
 		boolean showSpeed = !selectedEffectMode.hidesSpeed();
+		boolean showTerrain = selectedEffectMode != BuildEffectMode.DISMANTLE;
+		if (this.structureButton != null) this.structureButton.setY(layout.structureButtonY());
+		if (this.folderButton != null) this.folderButton.setY(layout.structureButtonY());
+		if (this.effectButton != null) this.effectButton.setY(layout.effectButtonY());
+		if (this.captureFormatButton != null) this.captureFormatButton.setY(layout.captureButtonY());
+		if (this.startButton != null) this.startButton.setY(layout.actionsButtonY());
+		if (this.captureButton != null) this.captureButton.setY(layout.actionsButtonY());
+		if (this.pauseResumeButton != null) this.pauseResumeButton.setY(layout.pauseButtonY());
+		if (this.rollbackButton != null) this.rollbackButton.setY(layout.pauseButtonY());
+		if (this.cancelPreviewButton != null) this.cancelPreviewButton.setY(layout.cancelButtonY());
+		for (Button button : new Button[] {structureButton,folderButton,effectButton,captureFormatButton,startButton,captureButton,
+			pauseResumeButton,rollbackButton,cancelPreviewButton}) if (button != null) button.setHeight(layout.buttonHeight());
+		if (this.optionsButton != null) {
+			this.optionsButton.visible = hasModeOptions();
+			this.optionsButton.active = hasModeOptions();
+			this.optionsButton.setY(layout.optionsButtonY());
+			this.optionsButton.setHeight(layout.buttonHeight());
+			setFittedMessage(this.optionsButton, optionsMessage());
+			this.optionsButton.setTooltip(selectedEffectMode == BuildEffectMode.BUILDER_CHARGE && selectedOptions.destructiveExplosion()
+				? Tooltip.create(Component.translatable("screen.grand_builder.destructive_warning")) : null);
+		}
 		if (this.speedButton != null) {
 			this.speedButton.visible = showSpeed;
 			this.speedButton.active = showSpeed;
 			this.speedButton.setX(layout.innerLeft());
 			this.speedButton.setY(layout.speedButtonY());
-			this.speedButton.setWidth(layout.splitLeft());
+			this.speedButton.setWidth(showTerrain ? layout.splitLeft() : layout.contentWidth());
 			this.speedButton.setHeight(layout.buttonHeight());
 			setFittedMessage(this.speedButton, speedMessage());
 		}
 		if (this.terrainButton != null) {
+			this.terrainButton.visible = showTerrain;
+			this.terrainButton.active = showTerrain;
 			int terrainX = showSpeed ? layout.innerLeft() + layout.splitLeft() + 4 : layout.innerLeft();
 			int terrainWidth = showSpeed ? layout.splitRight() : layout.contentWidth();
 			this.terrainButton.setX(terrainX);
@@ -453,10 +527,46 @@ public class BuilderMenuScreen extends Screen {
 		syncStructureChoicesFromServer();
 		syncSpeedFromServer();
 		YoutubeChannelFeed.requestRefreshIfNeeded();
+		updateEstimateRequest();
 		if (--statusPollCooldown <= 0) {
 			sendControl(BuildControlAction.STATUS_SILENT);
 			statusPollCooldown = 12;
 		}
+	}
+
+	private boolean hasModeOptions() {
+		return selectedEffectMode == BuildEffectMode.DISMANTLE || selectedEffectMode == BuildEffectMode.REVERSE
+			|| selectedEffectMode == BuildEffectMode.BUILDER_CHARGE;
+	}
+
+	private Component optionsMessage() {
+		return switch (selectedEffectMode) {
+			case REVERSE -> Component.translatable("screen.grand_builder.order_value",Component.translatable(selectedOptions.startSide().translationKey()));
+			case DISMANTLE -> Component.translatable("screen.grand_builder.dismantle_value",Component.translatable(selectedOptions.dismantleStyle().translationKey()));
+			case BUILDER_CHARGE -> Component.translatable(selectedOptions.destructiveExplosion()
+				? "screen.grand_builder.explosion_destructive" : "screen.grand_builder.explosion_visual");
+			default -> Component.empty();
+		};
+	}
+
+	private void updateEstimateRequest() {
+		BuildRequestPayload selection = selectionPayload();
+		if (!selection.equals(estimateSelection)) {
+			estimateSelection = selection;
+			estimate = null;
+			estimateDelay = 4;
+			estimateWaitTicks = 0;
+		}
+		if (estimate != null) return;
+		if (estimateDelay > 0 && --estimateDelay == 0 || estimateDelay == 0 && ++estimateWaitTicks >= 40) {
+			estimateRequestId = ++nextEstimateRequestId;
+			estimateWaitTicks = 0;
+			ClientPlayNetworking.send(new BuildEstimateRequestPayload(estimateRequestId, selection));
+		}
+	}
+
+	public void receiveEstimate(BuildEstimatePayload payload) {
+		if (payload.requestId() == estimateRequestId && selectionPayload().equals(estimateSelection)) estimate = payload;
 	}
 
 	private void syncStructureChoicesFromServer() {
@@ -514,31 +624,23 @@ public class BuilderMenuScreen extends Screen {
 		guiGraphics.fill(left - 3, top - 3, right + 3, bottom + 3, 0xF02A4D73);
 		guiGraphics.fillGradient(left, top, right, bottom, 0xF0142234, 0xF01B314A);
 		guiGraphics.fill(left + 16, layout.topSeparatorY(), right - 16, layout.topSeparatorY() + 1, 0x66B5E8FF);
-		guiGraphics.fill(left + 16, layout.captureLabelY() - 3, right - 16, layout.captureLabelY() - 2, 0x336A90B5);
+		if (layout.captureLabelY() >= 0) guiGraphics.fill(left + 16, layout.captureLabelY() - 3, right - 16, layout.captureLabelY() - 2, 0x336A90B5);
 		if (layout.statusSeparatorY() < bottom - 12) {
 			guiGraphics.fill(left + 16, layout.statusSeparatorY(), right - 16, layout.statusSeparatorY() + 1, 0x33577EA3);
 		}
 
 		drawCenteredFittedString(guiGraphics, Component.translatable("screen.grand_builder.title"), panelCenterX, layout.titleY(), Math.max(80, layout.contentWidth() - 90), 0xFFF6FAFF);
+		renderEta(guiGraphics, layout);
 		if (layout.showSubtitle()) {
 			drawCenteredFittedString(guiGraphics, Component.translatable("screen.grand_builder.subtitle"), panelCenterX, layout.subtitleY(), layout.contentWidth(), 0xFFB3D2F0);
 		}
-		drawFittedString(guiGraphics, Component.translatable("screen.grand_builder.structure"), layout.innerLeft() + 2, layout.structureLabelY(), layout.contentWidth(), 0xFFDBE9FF);
-		if (!selectedEffectMode.hidesSpeed()) {
+		if (layout.structureLabelY() >= 0) drawFittedString(guiGraphics, Component.translatable("screen.grand_builder.structure"), layout.innerLeft() + 2, layout.structureLabelY(), layout.contentWidth(), 0xFFDBE9FF);
+		if (layout.speedLabelY() >= 0) {
 			drawFittedString(guiGraphics, Component.translatable("screen.grand_builder.speed"), layout.innerLeft() + 2, layout.speedLabelY(), layout.contentWidth(), 0xFFDBE9FF);
 		}
-		drawFittedString(guiGraphics, Component.translatable("screen.grand_builder.effects"), layout.innerLeft() + 2, layout.effectLabelY(), layout.contentWidth(), 0xFFDBE9FF);
-		drawFittedString(guiGraphics, Component.translatable("screen.grand_builder.capture_format"), layout.innerLeft() + 2, layout.captureLabelY(), layout.contentWidth(), 0xFFDBE9FF);
+		if (layout.effectLabelY() >= 0) drawFittedString(guiGraphics, Component.translatable("screen.grand_builder.effects"), layout.innerLeft() + 2, layout.effectLabelY(), layout.contentWidth(), 0xFFDBE9FF);
+		if (layout.captureLabelY() >= 0) drawFittedString(guiGraphics, Component.translatable("screen.grand_builder.capture_format"), layout.innerLeft() + 2, layout.captureLabelY(), layout.contentWidth(), 0xFFDBE9FF);
 		renderLiveStatus(guiGraphics, layout);
-		BuildStatusClientState.Snapshot snapshot = BuildStatusClientState.snapshot();
-		drawCenteredFittedString(
-			guiGraphics,
-			Component.translatable(snapshot.modeId() == 2 ? "screen.grand_builder.hint_preview" : "screen.grand_builder.hint"),
-			panelCenterX,
-			layout.hintY(),
-			layout.contentWidth(),
-			0xFF95B6D8
-		);
 
 		super.render(guiGraphics, mouseX, mouseY, partialTick);
 		renderStructuresFolderTooltip(guiGraphics, mouseX, mouseY);
@@ -682,6 +784,23 @@ public class BuilderMenuScreen extends Screen {
 		}
 	}
 
+	private void renderEta(GuiGraphics graphics, UiLayout layout) {
+		BuildStatusClientState.Snapshot status = BuildStatusClientState.snapshot();
+		Component line;
+		int color = 0xFFFFDEA3;
+		if (status.modeId() != 0) {
+			line = Component.translatable(status.paused() ? "screen.grand_builder.eta_paused" : "screen.grand_builder.eta_remaining",
+				formatEtaTicks(status.etaTicks()));
+		} else if (estimate == null) {
+			line = Component.translatable("screen.grand_builder.eta_loading");
+			color = 0xFFB9D8F6;
+		} else if (!estimate.available()) {
+			line = Component.translatable("screen.grand_builder.eta_unavailable");
+			color = 0xFFB9D8F6;
+		} else line = Component.translatable("screen.grand_builder.eta_estimate", formatEtaTicks(estimate.etaTicks()));
+		drawFittedString(graphics,line,layout.innerLeft()+2,layout.etaY(),layout.contentWidth()-24,color);
+	}
+
 	private void renderLiveStatus(GuiGraphics guiGraphics, UiLayout layout) {
 		BuildStatusClientState.Snapshot snapshot = BuildStatusClientState.snapshot();
 		BuildSpeed speed = BuildSpeed.byNetworkId(snapshot.speedId());
@@ -690,16 +809,16 @@ public class BuilderMenuScreen extends Screen {
 			: selectedEffectMode.displayRate(speed);
 
 		Component modeText = switch (snapshot.modeId()) {
-			case 1 -> snapshot.paused()
+			case 1, 3 -> snapshot.paused()
 				? Component.translatable("screen.grand_builder.live_mode_paused")
-				: Component.translatable("screen.grand_builder.live_mode_building");
+				: Component.translatable(snapshot.modeId() == 3 ? "screen.grand_builder.live_mode_dismantling" : "screen.grand_builder.live_mode_building");
 			case 2 -> Component.translatable("screen.grand_builder.live_mode_preview");
 			default -> Component.translatable("screen.grand_builder.live_mode_none");
 		};
 
 		Component structureLine = Component.translatable(
 			"screen.grand_builder.live_structure",
-			snapshot.structureName().isBlank() ? "-" : snapshot.structureName()
+			snapshot.structureName().isBlank() ? currentSelection().displayName() : snapshot.structureName()
 		);
 		String progressText = String.format(Locale.US, "%.1f", snapshot.progressPercent());
 		Component progressLine = Component.translatable(
@@ -707,6 +826,9 @@ public class BuilderMenuScreen extends Screen {
 			progressText,
 			snapshot.remainingBlocks()
 		);
+		if (snapshot.modeId() == 0 && estimate != null && estimate.available()) {
+			progressLine = Component.translatable("screen.grand_builder.estimate_blocks", estimate.totalBlocks());
+		}
 		Component etaLine = selectedEffectMode.hidesSpeed()
 			? Component.translatable("screen.grand_builder.live_eta_scene", formatEtaTicks(snapshot.etaTicks()))
 			: Component.translatable(
@@ -754,12 +876,13 @@ public class BuilderMenuScreen extends Screen {
 
 	private static String formatEtaTicks(int ticks) {
 		if (ticks <= 0) {
-			return "--:--";
+			return ticks == 0 ? "00:00" : "--:--";
 		}
 
 		long totalSeconds = Math.max(1L, (ticks + 19L) / 20L);
 		long minutes = totalSeconds / 60L;
 		long seconds = totalSeconds % 60L;
+		if (minutes >= 60) return String.format(Locale.US, "%02d:%02d:%02d", minutes/60,minutes%60,seconds);
 		return String.format(Locale.US, "%02d:%02d", minutes, seconds);
 	}
 

@@ -10,6 +10,8 @@ import dev.grandbuilder.client.StructureListClientState;
 import dev.grandbuilder.network.BuildControlAction;
 import dev.grandbuilder.network.BuildControlPayload;
 import dev.grandbuilder.network.BuildEffectPayload;
+import dev.grandbuilder.network.BuildEstimatePayload;
+import dev.grandbuilder.network.LightningStrikePayload;
 import dev.grandbuilder.network.HerobrinePlacementPayload;
 import dev.grandbuilder.network.BuildStatusPayload;
 import dev.grandbuilder.network.StructureListPayload;
@@ -61,6 +63,12 @@ public class GrandBuilderModClient implements ClientModInitializer {
 			context.client().execute(() -> GrandBuilderClientEffects.trigger(payload))
 		);
 		HudRenderCallback.EVENT.register(GrandBuilderClientEffects::render);
+		ClientPlayNetworking.registerGlobalReceiver(BuildEstimatePayload.TYPE, (payload, context) ->
+			context.client().execute(() -> {
+				if (context.client().screen instanceof BuilderMenuScreen menu) menu.receiveEstimate(payload);
+			}));
+		ClientPlayNetworking.registerGlobalReceiver(LightningStrikePayload.TYPE, (payload, context) ->
+			context.client().execute(() -> GrandBuilderClientEffects.strike(payload)));
 		ClientPlayNetworking.registerGlobalReceiver(HerobrinePlacementPayload.TYPE, (payload, context) ->
 			context.client().execute(() -> GrandBuilderClientEffects.place(payload))
 		);

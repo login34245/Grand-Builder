@@ -26,6 +26,7 @@ import net.minecraft.world.phys.Vec3;
 public final class GrandBuilderWorldEffects {
 	private static final RenderStateDataKey<List<GrandBuilderClientEffects.Frame>> SCENES = RenderStateDataKey.create();
 	private static final RenderStateDataKey<List<GrandBuilderClientEffects.ActorFrame>> ACTORS = RenderStateDataKey.create();
+	private static final RenderStateDataKey<List<GrandBuilderClientEffects.BoltFrame>> BOLTS = RenderStateDataKey.create();
 	private static final RenderType SOLID = layer("effect_solid", false, true);
 	private static final RenderType VEIL = layer("effect_veil", false, false);
 	private static final RenderType GLOW = layer("effect_glow", true, false);
@@ -71,12 +72,14 @@ public final class GrandBuilderWorldEffects {
 		float partialTick = context.tickCounter().getGameTimeDeltaPartialTick(false);
 		context.worldState().setData(SCENES, GrandBuilderClientEffects.extract(partialTick));
 		context.worldState().setData(ACTORS, GrandBuilderClientEffects.extractActors(partialTick));
+		context.worldState().setData(BOLTS, GrandBuilderClientEffects.extractBolts(partialTick));
 	}
 
 	private static void draw(WorldRenderContext context) {
 		List<GrandBuilderClientEffects.Frame> frames = context.worldState().getData(SCENES);
 		List<GrandBuilderClientEffects.ActorFrame> actors = context.worldState().getData(ACTORS);
-		if (frames == null || actors == null || (frames.isEmpty() && actors.isEmpty())) return;
+		List<GrandBuilderClientEffects.BoltFrame> bolts = context.worldState().getData(BOLTS);
+		if (frames == null || actors == null || bolts == null || (frames.isEmpty() && actors.isEmpty() && bolts.isEmpty())) return;
 		Vec3 camera = context.worldState().cameraRenderState.pos;
 		VertexConsumer solid = buffers.getBuffer(SOLID);
 		VertexConsumer veil = buffers.getBuffer(VEIL);
@@ -99,6 +102,13 @@ public final class GrandBuilderWorldEffects {
 			matrices.pushPose();
 			matrices.translate(actor.x() - camera.x, actor.y() - camera.y, actor.z() - camera.z);
 			EffectGeometry.emitHerobrine(actor, sink);
+			matrices.popPose();
+		}
+		for (GrandBuilderClientEffects.BoltFrame bolt : bolts) {
+			if (bolt.opacity() <= 0 || camera.distanceToSqr(bolt.x(),bolt.y(),bolt.z()) > 256.0*256.0) continue;
+			matrices.pushPose();
+			matrices.translate(bolt.x()-camera.x,bolt.y()-camera.y,bolt.z()-camera.z);
+			EffectGeometry.emitLightning(bolt,sink);
 			matrices.popPose();
 		}
 		buffers.endBatch(SOLID);

@@ -1,5 +1,7 @@
 package dev.grandbuilder.client;
 
+import dev.grandbuilder.build.BuildStartSide;
+import dev.grandbuilder.network.BuildEffectPayload;
 import java.util.ArrayDeque;
 import org.joml.Matrix4f;
 import org.joml.Vector3f;
@@ -29,6 +31,7 @@ public final class EffectGeometry {
 			case CLOCKWORK_GRID -> clockwork(mesh, frame);
 			case AURORA_WEAVE -> aurora(mesh, frame);
 			case BUILDER_CHARGE -> builderCharge(mesh, frame);
+			case REVERSE -> directional(mesh, frame);
 			default -> { }
 		}
 	}
@@ -70,7 +73,7 @@ public final class EffectGeometry {
 			m.push(0, -0.49, 0);
 			m.box(0.125, 0.20, 0.125, 0xB88769, body, 1);
 			m.pop();
-			if (arm == -1 && !f.ghost() && f.age() < f.contactTick()) {
+			if (arm == -1 && !f.ghost() && (f.dismantling() ? f.age() >= f.contactTick() : f.age() < f.contactTick())) {
 				m.push(0, -0.74, 0.06);
 				m.rotate(0.12, 0.25, 0);
 				m.box(0.21, 0.21, 0.21, f.blockColor(), Material.SOLID, 1);
@@ -129,9 +132,11 @@ public final class EffectGeometry {
 	}
 
 	private static void builderCharge(Mesh m, GrandBuilderClientEffects.Frame f) {
-		double t = f.phaseProgress();
-		double roof = f.height() + 3;
-		if (!f.revealing()) {
+		if (f.dismantling() && f.phase() == BuildEffectPayload.PHASE_STOP) { dismantleWave(m,f); return; }
+		boolean dismantleBurst = f.dismantling() && f.phase() != BuildEffectPayload.PHASE_ARRIVAL;
+		double t = dismantleBurst ? clamp(f.age()/44) : f.phaseProgress();
+		double roof = f.destructive() ? 1.5 : f.height() + 3;
+		if (!f.revealing() && !dismantleBurst) {
 			double flight = ease(t / 0.78);
 			double x = -42 * (1 - flight), z = 26 * (1 - flight);
 			double y = roof + 32 * (1 - flight) + Math.sin(flight * Math.PI) * 14;
@@ -169,6 +174,10 @@ public final class EffectGeometry {
 				m.pop();
 			}
 			m.pop();
+			return;
+		}
+		if (t >= 1) {
+			if (f.dismantling()) dismantleWave(m, f);
 			return;
 		}
 		double expansion = 1 - Math.pow(1-t, 3);
@@ -220,6 +229,109 @@ public final class EffectGeometry {
 		m.push(0, f.height()*ease((t-0.06)/0.75)+0.1, 0);
 		m.rectangle(halfX, halfZ, 0.04, ICE, cage*0.55);
 		m.pop();
+		blastWave(m, f.radius()+7, t);
+		if (f.dismantling()) dismantleWave(m, f);
+	}
+
+	private static void blastWave(Mesh m, double size, double t) {
+		double radius = 0.4 + size*(1-Math.pow(1-t,3));
+		double fade = 1-ease((t-0.45)/0.55);
+		m.push(0, 0.25+Math.sin(t*Math.PI)*0.6, 0);
+		m.torus(radius, 0.11*(1-t)+0.025, 0, 0xB7F3FF, fade*0.65);
+		for (int i = 0; i < 48; i++) {
+			double a=i*TAU/48,b=(i+1)*TAU/48,inner=Math.max(0.2,radius-1.8*(1-t));
+			m.gradientQuad(Math.cos(a)*radius,0,Math.sin(a)*radius,Math.cos(b)*radius,0,Math.sin(b)*radius,
+				Math.cos(b)*inner,0.12,Math.sin(b)*inner,Math.cos(a)*inner,0.12,Math.sin(a)*inner,
+				0xC8E6EE,fade*0.17,0);
+		}
+		m.pop();
+	}
+
+	private static void dismantleWave(Mesh m, GrandBuilderClientEffects.Frame f) {
+		double radius = 0.3 + Math.hypot(f.width(),f.depth())*0.5*Math.sqrt(f.progress());
+		double pulse = 0.45 + Math.sin(f.motionAge()*0.4)*0.15;
+		m.push(0,0.18,0);
+		m.torus(radius,0.09,0,0xFFCC82,pulse);
+		m.cone(radius,radius+0.12,Math.min(f.height(),1.2),0x91E5FF,pulse*0.08);
+		m.pop();
+	}
+
+	private static void directional(Mesh m, GrandBuilderClientEffects.Frame f) {
+		int facing = f.orderId()/8;
+		double rotation = facing == 5 ? -Math.PI/2 : facing == 3 ? Math.PI : facing == 4 ? Math.PI/2 : 0;
+		double width = facing == 5 || facing == 4 ? f.depth() : f.width();
+		double depth = facing == 5 || facing == 4 ? f.width() : f.depth();
+		double x=width*0.5+0.12,z=depth*0.5+0.12,h=f.height();
+		double progress=f.progress();
+		double alpha=0.40+Math.sin(f.motionAge()*0.18)*0.08;
+		m.push(0,0,0);
+		m.rotate(0,rotation,0);
+		for(int sx=-1;sx<=1;sx+=2) for(int sz=-1;sz<=1;sz+=2)
+			m.tube(sx*x,0,sz*z,sx*x,h,sz*z,0.023,0xA5C8DE,Material.GLOW,0.13);
+		BuildStartSide side=BuildStartSide.byId(f.orderId()&7);
+		if(side==BuildStartSide.TOP) {
+			m.push(0,h*(1-progress)+0.08,0);
+			m.rectangle(x,z,0.04,ICE,alpha);
+			m.pop();
+		} else if(side==BuildStartSide.FRONT || side==BuildStartSide.BACK) {
+			double p=(side==BuildStartSide.FRONT?-1:1)*z*(1-2*progress);
+			m.tube(-x,0,p,x,0,p,0.045,ICE,Material.GLOW,alpha);
+			m.tube(-x,h,p,x,h,p,0.045,ICE,Material.GLOW,alpha);
+			m.tube(-x,0,p,-x,h,p,0.045,ICE,Material.GLOW,alpha);
+			m.tube(x,0,p,x,h,p,0.045,ICE,Material.GLOW,alpha);
+		} else {
+			double p=(side==BuildStartSide.LEFT?-1:1)*x*(1-2*progress);
+			m.tube(p,0,-z,p,0,z,0.045,ICE,Material.GLOW,alpha);
+			m.tube(p,h,-z,p,h,z,0.045,ICE,Material.GLOW,alpha);
+			m.tube(p,0,-z,p,h,-z,0.045,ICE,Material.GLOW,alpha);
+			m.tube(p,0,z,p,h,z,0.045,ICE,Material.GLOW,alpha);
+		}
+		m.pop();
+	}
+
+	public static void emitLightning(GrandBuilderClientEffects.BoltFrame f, Sink sink) {
+		double after=Math.max(0,f.age()-f.contactTick());
+		double fade=1-ease(after/4.5);
+		Mesh m=new Mesh(sink,f.opacity()*(float)fade);
+		double height=15+Math.floorMod(f.sequence(),5);
+		double growth=clamp(f.age()/Math.max(1,f.contactTick()));
+		double strength=f.age()<f.contactTick()?0.18:0.82*Math.exp(-after*0.28);
+		double[][] points=new double[13][3];
+		for(int i=0;i<=12;i++) {
+			double fraction=i/12.0;
+			double envelope=Math.sin(fraction*Math.PI);
+			points[i]=new double[]{Math.sin(f.sequence()*1.31+i*2.71)*envelope*1.4,height*(1-fraction),
+				Math.cos(f.sequence()*0.91+i*3.93)*envelope*1.2};
+		}
+		for(int i=0;i<12;i++) {
+			double local=clamp(growth*12-i);
+			if(local<=0) break;
+			double[] a=points[i], b=points[i+1];
+			double bx=mix(a[0],b[0],local),by=mix(a[1],b[1],local),bz=mix(a[2],b[2],local);
+			m.tube(a[0],a[1],a[2],bx,by,bz,0.085,0x75B9FF,Material.GLOW,strength*0.35);
+			m.tube(a[0],a[1],a[2],bx,by,bz,0.027,0xF4FBFF,Material.GLOW,strength);
+			if((i==3 || i==6 || i==8) && local==1) {
+				double angle=f.sequence()*0.71+i;
+				for(int j=0;j<3;j++) {
+					double d0=j*1.0,d1=(j+1)*1.0;
+					m.tube(b[0]+Math.cos(angle)*d0,b[1]-d0*0.6,b[2]+Math.sin(angle)*d0,
+						b[0]+Math.cos(angle+0.16)*d1,b[1]-d1*0.6,b[2]+Math.sin(angle+0.16)*d1,
+						0.015,0xBFDFFF,Material.GLOW,strength*(0.40-j*0.10));
+				}
+			}
+		}
+		if(f.age()>=f.contactTick()) {
+			m.push(0,-0.48,0);
+			m.torus(0.25+after*0.20,0.025,0,0xA4DFFF,strength*0.42);
+			m.pop();
+			for(int i=0;i<6;i++) {
+				double a=i*TAU/6+f.sequence(),r=0.22+after*0.12;
+				m.push(Math.cos(a)*r,0.08+after*0.13,Math.sin(a)*r);
+				m.rotate(a,after*0.35,a*0.4);
+				m.box(0.015,0.09,0.015,f.dismantling()?0xFFD2A2:0xBBE9FF,Material.GLOW,strength*0.65);
+				m.pop();
+			}
+		}
 	}
 
 	private static void ufo(Mesh m, GrandBuilderClientEffects.Frame f) {

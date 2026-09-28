@@ -2,6 +2,9 @@ package dev.grandbuilder;
 
 import dev.grandbuilder.build.AnimatedBuildManager;
 import dev.grandbuilder.build.BuildEffectMode;
+import dev.grandbuilder.build.BuildOptions;
+import dev.grandbuilder.build.BuildStartSide;
+import dev.grandbuilder.build.DismantleStyle;
 import dev.grandbuilder.build.BuildSpeed;
 import dev.grandbuilder.build.CustomCaptureFormat;
 import dev.grandbuilder.build.StructureSelectionManager;
@@ -12,6 +15,9 @@ import dev.grandbuilder.item.StructureSelectorItem;
 import dev.grandbuilder.network.BuildControlAction;
 import dev.grandbuilder.network.BuildControlPayload;
 import dev.grandbuilder.network.BuildEffectPayload;
+import dev.grandbuilder.network.BuildEstimatePayload;
+import dev.grandbuilder.network.BuildEstimateRequestPayload;
+import dev.grandbuilder.network.LightningStrikePayload;
 import dev.grandbuilder.network.HerobrinePlacementPayload;
 import dev.grandbuilder.network.BuildRequestPayload;
 import dev.grandbuilder.network.BuildSetSpeedPayload;
@@ -83,6 +89,9 @@ public class GrandBuilderMod implements ModInitializer {
 		StructureLibrary.ensureStructuresDirectory();
 
 		PayloadTypeRegistry.playC2S().register(BuildRequestPayload.TYPE, BuildRequestPayload.CODEC);
+		PayloadTypeRegistry.playC2S().register(BuildEstimateRequestPayload.TYPE, BuildEstimateRequestPayload.CODEC);
+		PayloadTypeRegistry.playS2C().register(BuildEstimatePayload.TYPE, BuildEstimatePayload.CODEC);
+		PayloadTypeRegistry.playS2C().register(LightningStrikePayload.TYPE, LightningStrikePayload.CODEC);
 		PayloadTypeRegistry.playC2S().register(BuildControlPayload.TYPE, BuildControlPayload.CODEC);
 		PayloadTypeRegistry.playC2S().register(BuildSetSpeedPayload.TYPE, BuildSetSpeedPayload.CODEC);
 		PayloadTypeRegistry.playC2S().register(CaptureRequestPayload.TYPE, CaptureRequestPayload.CODEC);
@@ -112,8 +121,12 @@ public class GrandBuilderMod implements ModInitializer {
 				BuildSpeed.byNetworkId(payload.speedId()),
 				BuildEffectMode.byNetworkId(payload.effectModeId())
 			);
+			AnimatedBuildManager.setOptions(context.player().getUUID(), new BuildOptions(BuildStartSide.byId(payload.orderId()),
+				DismantleStyle.byId(payload.dismantleStyleId()), payload.destructiveExplosion()));
 			AnimatedBuildManager.preparePreview(context.player());
 		}));
+		ServerPlayNetworking.registerGlobalReceiver(BuildEstimateRequestPayload.TYPE, (payload, context) ->
+			context.server().execute(() -> AnimatedBuildManager.sendEstimate(context.player(), payload)));
 
 		ServerPlayNetworking.registerGlobalReceiver(BuildControlPayload.TYPE, (payload, context) -> context.server().execute(() -> {
 			BuildControlAction action = payload.action();

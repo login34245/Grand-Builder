@@ -4,6 +4,7 @@ import dev.grandbuilder.build.BuildEffectMode;
 import dev.grandbuilder.build.HerobrineTiming;
 import dev.grandbuilder.network.BuildEffectPayload;
 import dev.grandbuilder.network.HerobrinePlacementPayload;
+import dev.grandbuilder.network.LightningStrikePayload;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -27,7 +28,12 @@ public final class GrandBuilderClientEffects {
 	}
 
 	public record Frame(BuildEffectMode mode, int phase, float age, float motionAge, int duration, float progress,
-		float opacity, double x, double y, double z, double width, double height, double depth) {
+		float opacity, double x, double y, double z, double width, double height, double depth,
+		boolean dismantling, int orderId, boolean destructive) {
+		public Frame(BuildEffectMode mode, int phase, float age, float motionAge, int duration, float progress,
+			float opacity, double x, double y, double z, double width, double height, double depth) {
+			this(mode,phase,age,motionAge,duration,progress,opacity,x,y,z,width,height,depth,false,0,false);
+		}
 		public boolean revealing() {
 			return phase == BuildEffectPayload.PHASE_REVEAL;
 		}
@@ -50,6 +56,9 @@ public final class GrandBuilderClientEffects {
 		private int staleTicks;
 		private Actor actor;
 		private final List<Actor> ghosts = new ArrayList<>();
+		private final List<Bolt> bolts = new ArrayList<>();
+		private int movingPhase;
+		private boolean blastTriggered;
 
 		private Scene(BuildEffectPayload payload) {
 			this.payload = payload;
@@ -59,11 +68,43 @@ public final class GrandBuilderClientEffects {
 			this.previousMotionAge = age;
 			this.progress = clamp(payload.progress());
 			this.previousProgress = progress;
+			this.movingPhase = payload.phaseId() == BuildEffectPayload.PHASE_PAUSED
+				? BuildEffectMode.byNetworkId(payload.effectModeId()).instantReveal() ? BuildEffectPayload.PHASE_ARRIVAL : BuildEffectPayload.PHASE_BUILD
+				: payload.phaseId();
 		}
 	}
 
 	public record ActorFrame(double x, double y, double z, double targetX, double targetY, double targetZ,
-		float age, int duration, int contactTick, int blockColor, float opacity, boolean ghost) {
+		float age, int duration, int contactTick, int blockColor, float opacity, boolean ghost, boolean dismantling) {
+		public ActorFrame(double x, double y, double z, double targetX, double targetY, double targetZ,
+			float age, int duration, int contactTick, int blockColor, float opacity, boolean ghost) {
+			this(x,y,z,targetX,targetY,targetZ,age,duration,contactTick,blockColor,opacity,ghost,false);
+		}
+	}
+
+	public record BoltFrame(double x, double y, double z, int sequence, float age, int contactTick, float opacity, boolean dismantling) {
+	}
+
+	private static final class Bolt {
+		private final LightningStrikePayload payload;
+		private float age;
+		private float previousAge;
+		private Bolt(LightningStrikePayload payload) { this.payload=payload; this.age=payload.age(); this.previousAge=age; }
+	}
+
+	public static void strike(LightningStrikePayload payload) {
+		Minecraft client = Minecraft.getInstance();
+		if (client.level == null || !client.level.dimension().identifier().equals(payload.dimension())) return;
+		Scene scene = SCENES.get(payload.sceneId());
+		if (scene == null || BuildEffectMode.byNetworkId(scene.payload.effectModeId()) != BuildEffectMode.LIGHTNING) return;
+		for (Bolt bolt : scene.bolts) {
+			if (bolt.payload.sequence() == payload.sequence()) {
+				bolt.age = bolt.previousAge = Math.max(0,payload.age());
+				return;
+			}
+		}
+		if (scene.bolts.size() >= 64) scene.bolts.removeFirst();
+		scene.bolts.add(new Bolt(payload));
 	}
 
 	private static final class Actor {
@@ -115,7 +156,8 @@ public final class GrandBuilderClientEffects {
 			if (SCENES.size() >= 16) {
 				SCENES.remove(SCENES.keySet().iterator().next());
 			}
-			SCENES.put(payload.sceneId(), new Scene(payload));
+			scene = new Scene(payload);
+			SCENES.put(payload.sceneId(), scene);
 		} else {
 			if (changedPhase) {
 				scene.age = payload.ageTicks();
@@ -124,7 +166,11 @@ public final class GrandBuilderClientEffects {
 			scene.payload = payload;
 			scene.staleTicks = 0;
 		}
-		if (changedPhase && payload.phaseId() == BuildEffectPayload.PHASE_REVEAL && client.player != null) {
+		if (payload.phaseId() != BuildEffectPayload.PHASE_PAUSED) scene.movingPhase = payload.phaseId();
+		boolean dismantleBlast = payload.dismantling() && BuildEffectMode.byNetworkId(payload.effectModeId()) == BuildEffectMode.BUILDER_CHARGE
+			&& payload.phaseId() == BuildEffectPayload.PHASE_BUILD && !scene.blastTriggered;
+		if (dismantleBlast) scene.blastTriggered = true;
+		if ((changedPhase && payload.phaseId() == BuildEffectPayload.PHASE_REVEAL || dismantleBlast) && client.player != null) {
 			double distance = client.player.position().distanceTo(new Vec3(
 				(payload.min().getX() + payload.max().getX() + 1.0) * 0.5, payload.min().getY(),
 				(payload.min().getZ() + payload.max().getZ() + 1.0) * 0.5));
@@ -166,6 +212,10 @@ public final class GrandBuilderClientEffects {
 					scene.actor.age = Math.min(scene.actor.age + 1, scene.actor.payload.duration());
 				}
 				scene.ghosts.removeIf(actor -> ++actor.ghostAge >= 6);
+				scene.bolts.removeIf(bolt -> {
+					bolt.previousAge = bolt.age;
+					return ++bolt.age > HerobrineTiming.contactTick(Math.max(1,bolt.payload.duration()))+5;
+				});
 			}
 			scene.progress += (clamp(scene.payload.progress()) - scene.progress) * 0.35f;
 			scene.staleTicks++;
@@ -187,13 +237,13 @@ public final class GrandBuilderClientEffects {
 			} else if (p.phaseId() == BuildEffectPayload.PHASE_PAUSED) {
 				opacity = 0.28f;
 			}
-			frames.add(new Frame(BuildEffectMode.byNetworkId(p.effectModeId()), p.phaseId(), age,
+			frames.add(new Frame(BuildEffectMode.byNetworkId(p.effectModeId()), scene.movingPhase, age,
 				lerp(scene.previousMotionAge, scene.motionAge, partialTick),
 				Math.max(1, p.durationTicks()), lerp(scene.previousProgress, scene.progress, partialTick), opacity,
 				(p.min().getX() + p.max().getX() + 1.0) * 0.5, p.min().getY(),
 				(p.min().getZ() + p.max().getZ() + 1.0) * 0.5,
 				p.max().getX() - p.min().getX() + 1.0, p.max().getY() - p.min().getY() + 1.0,
-				p.max().getZ() - p.min().getZ() + 1.0));
+				p.max().getZ() - p.min().getZ() + 1.0, p.dismantling(), p.orderId(), p.destructive()));
 		}
 		return List.copyOf(frames);
 	}
@@ -216,11 +266,27 @@ public final class GrandBuilderClientEffects {
 
 	private static ActorFrame actorFrame(Actor actor, float partialTick, float opacity, boolean ghost) {
 		HerobrinePlacementPayload p = actor.payload;
-		int duration = Math.max(2, Math.min(24, p.duration()));
+		int duration = Math.max(1, Math.min(24, p.duration()));
 		return new ActorFrame(p.x(), p.y(), p.z(), p.target().getX() + 0.5 - p.x(),
 			p.target().getY() + 0.5 - p.y(), p.target().getZ() + 0.5 - p.z(),
 			lerp(actor.previousAge, actor.age, partialTick), duration, HerobrineTiming.contactTick(duration),
-			actor.blockColor, opacity, ghost);
+			actor.blockColor, opacity, ghost, p.dismantling());
+	}
+
+	public static List<BoltFrame> extractBolts(float partialTick) {
+		List<BoltFrame> frames = new ArrayList<>();
+		for (Scene scene : SCENES.values()) {
+			int phase = scene.payload.phaseId();
+			float opacity = phase == BuildEffectPayload.PHASE_PAUSED ? 0.35f : 1;
+			if (phase == BuildEffectPayload.PHASE_STOP) opacity *= clamp(1-scene.age/5);
+			for (Bolt bolt : scene.bolts) {
+				LightningStrikePayload p = bolt.payload;
+				frames.add(new BoltFrame(p.target().getX()+0.5,p.target().getY()+0.5,p.target().getZ()+0.5,p.sequence(),
+					lerp(bolt.previousAge,bolt.age,phase == BuildEffectPayload.PHASE_PAUSED ? 1 : partialTick),
+					HerobrineTiming.contactTick(Math.max(1,p.duration())), opacity, p.dismantling()));
+			}
+		}
+		return List.copyOf(frames);
 	}
 
 	public static float shake(float partialTick) {
