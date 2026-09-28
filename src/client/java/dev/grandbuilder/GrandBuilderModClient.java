@@ -13,6 +13,7 @@ import dev.grandbuilder.network.BuildEffectPayload;
 import dev.grandbuilder.network.BuildEstimatePayload;
 import dev.grandbuilder.network.LightningStrikePayload;
 import dev.grandbuilder.network.HerobrinePlacementPayload;
+import dev.grandbuilder.network.KineticBuildPayload;
 import dev.grandbuilder.network.BuildStatusPayload;
 import dev.grandbuilder.network.StructureListPayload;
 import net.fabricmc.api.ClientModInitializer;
@@ -50,11 +51,45 @@ public class GrandBuilderModClient implements ClientModInitializer {
 	));
 
 	private static boolean hintShown;
+	private static final PreviewKey[] PREVIEW_KEYS = {
+		new PreviewKey("rotate_preview", GLFW.GLFW_KEY_R, BuildControlAction.ROTATE_PREVIEW, false),
+		new PreviewKey("move_preview_forward", GLFW.GLFW_KEY_UP, BuildControlAction.MOVE_PREVIEW_FORWARD, true),
+		new PreviewKey("move_preview_back", GLFW.GLFW_KEY_DOWN, BuildControlAction.MOVE_PREVIEW_BACK, true),
+		new PreviewKey("move_preview_left", GLFW.GLFW_KEY_LEFT, BuildControlAction.MOVE_PREVIEW_LEFT, true),
+		new PreviewKey("move_preview_right", GLFW.GLFW_KEY_RIGHT, BuildControlAction.MOVE_PREVIEW_RIGHT, true),
+		new PreviewKey("move_preview_up", GLFW.GLFW_KEY_PAGE_UP, BuildControlAction.MOVE_PREVIEW_UP, true),
+		new PreviewKey("move_preview_down", GLFW.GLFW_KEY_PAGE_DOWN, BuildControlAction.MOVE_PREVIEW_DOWN, true)
+	};
+
+	private static final class PreviewKey {
+		private final KeyMapping key;
+		private final BuildControlAction action;
+		private final boolean repeat;
+		private int heldTicks;
+		private PreviewKey(String name, int code, BuildControlAction action, boolean repeat) {
+			this.key = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.grand_builder." + name,
+				InputConstants.Type.KEYSYM, code, GRAND_BUILDER_CATEGORY));
+			this.action = action;
+			this.repeat = repeat;
+		}
+		private void tick(boolean active) {
+			boolean clicked = false;
+			while (key.consumeClick()) clicked = true;
+			if (!active) { heldTicks = 0; return; }
+			heldTicks = key.isDown() ? heldTicks + 1 : 0;
+			if (clicked || repeat && heldTicks > 8 && heldTicks % 4 == 0)
+				ClientPlayNetworking.send(new BuildControlPayload(action.networkId()));
+		}
+	}
 
 	@Override
 	public void onInitializeClient() {
 		ClientPlayNetworking.registerGlobalReceiver(BuildStatusPayload.TYPE, (payload, context) ->
-			context.client().execute(() -> BuildStatusClientState.update(payload))
+			context.client().execute(() -> {
+				BuildStatusClientState.update(payload);
+				if (payload.modeId() == 2) PreviewConfirmState.arm();
+				else PreviewConfirmState.disarm();
+			})
 		);
 		ClientPlayNetworking.registerGlobalReceiver(StructureListPayload.TYPE, (payload, context) ->
 			context.client().execute(() -> StructureListClientState.update(payload))
@@ -72,10 +107,13 @@ public class GrandBuilderModClient implements ClientModInitializer {
 		ClientPlayNetworking.registerGlobalReceiver(HerobrinePlacementPayload.TYPE, (payload, context) ->
 			context.client().execute(() -> GrandBuilderClientEffects.place(payload))
 		);
+		ClientPlayNetworking.registerGlobalReceiver(KineticBuildPayload.TYPE, (payload, context) ->
+			context.client().execute(() -> GrandBuilderClientEffects.kinetic(payload)));
 		GrandBuilderWorldEffects.initialize();
 
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
 			GrandBuilderClientEffects.tick(client);
+			for (PreviewKey key : PREVIEW_KEYS) key.tick(client.player != null && client.screen == null && PreviewConfirmState.isAwaitingConfirm());
 			if (client.player == null) {
 				PreviewConfirmState.disarm();
 				return;
@@ -107,7 +145,7 @@ public class GrandBuilderModClient implements ClientModInitializer {
 			}
 
 			while (CONFIRM_PREVIEW_KEY.consumeClick()) {
-				if (!PreviewConfirmState.isAwaitingConfirm()) {
+				if (client.screen != null || !PreviewConfirmState.isAwaitingConfirm()) {
 					continue;
 				}
 				PreviewConfirmState.disarm();
@@ -115,7 +153,7 @@ public class GrandBuilderModClient implements ClientModInitializer {
 			}
 
 			while (CANCEL_PREVIEW_KEY.consumeClick()) {
-				if (!PreviewConfirmState.isAwaitingConfirm()) {
+				if (client.screen != null || !PreviewConfirmState.isAwaitingConfirm()) {
 					continue;
 				}
 				PreviewConfirmState.disarm();

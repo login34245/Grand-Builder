@@ -8,6 +8,11 @@ import dev.grandbuilder.build.BuildStartSide;
 import dev.grandbuilder.build.BuildOptions;
 import dev.grandbuilder.build.DismantleStyle;
 import dev.grandbuilder.network.BuildEffectPayload;
+import dev.grandbuilder.network.KineticBuildPayload;
+import dev.grandbuilder.build.PreviewPlacement;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import java.util.List;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
@@ -48,10 +53,56 @@ public final class EffectGeometryTest {
 		verifyOptions();
 		verifyBuildDirections();
 		verifyCadence();
+		verifyKinetic();
+		verifyPreviewPlacement();
 		check(BuildEffectMode.AURORA_WEAVE.networkId() == 5 && BuildEffectMode.HEROBRINE.networkId() == 6
 			&& BuildEffectMode.BUILDER_CHARGE.networkId() == 7, "Existing mode IDs changed");
 		check(BuildEffectMode.BUILDER_CHARGE.hidesSpeed() && !BuildEffectMode.HEROBRINE.hidesSpeed(), "Wrong speed controls");
 		System.out.println("Effect geometry verified: " + samples + " scenes, " + actors + " actors, " + bolts + " bolts; standard cadence and mode options verified.");
+	}
+
+	private static void verifyPreviewPlacement() {
+		for (Direction direction : new Direction[] {Direction.NORTH, Direction.EAST, Direction.SOUTH, Direction.WEST}) {
+			PreviewPlacement original = new PreviewPlacement(new BlockPos(-7, 100, 3), direction, new BlockPos(2, 100, 5));
+			PreviewPlacement rotated = original;
+			for (int i = 0; i < 4; i++) rotated = rotated.rotate();
+			check(rotated.equals(original), "Four rotations must preserve the preview exactly");
+			for (Direction move : Direction.values()) {
+				check(original.move(move).move(move.getOpposite()).equals(original), "Preview move is not reversible");
+				check(original.move(move).rotate().equals(original.rotate().move(move)), "Rotation pivot does not follow translation");
+			}
+		}
+	}
+
+	private static void verifyKinetic() {
+		int count = 0;
+		for (BuildEffectMode mode : BuildEffectMode.values()) {
+			if (!mode.kinetic()) continue;
+			check(!mode.hidesSpeed() && mode.setupTicks() > 0, "Kinetic modes must preserve speed selection");
+			for (double size : new double[] {1, 20, 256}) for (int index : new int[] {0, 1, 12, 512, 24000}) {
+				var cell = new KineticBuildPayload.Cell(new BlockPos(3, 5, -4), 1, index);
+				for (float setup : new float[] {mode.setupTicks(), mode.setupTicks() / 2f, 0}) for (int budget : new int[] {1, 6, 512}) {
+					var scene = new GrandBuilderClientEffects.Frame(mode, BuildEffectPayload.PHASE_BUILD, 16, 16, 100, 0, 1,
+						0, 0, 0, size, size, size);
+					var frame = new GrandBuilderClientEffects.KineticFrame(scene, List.of(cell), index, budget, 1, 0.5f, setup);
+					var pose = KineticGeometry.pose(frame, cell);
+					if (pose != null) {
+						for (double v : new double[] {pose.x(), pose.y(), pose.z(), pose.pitch(), pose.yaw(), pose.roll(), pose.scale()})
+							check(Double.isFinite(v), "Non-finite kinetic transform");
+						check(pose.scale() > 0 && pose.scale() <= 1, "Invalid kinetic block scale");
+					}
+					count++;
+				}
+				var scene = new GrandBuilderClientEffects.Frame(mode, BuildEffectPayload.PHASE_BUILD, 100, 100, 100, 0, 1,
+					0, 0, 0, size, size, size);
+				var frame = new GrandBuilderClientEffects.KineticFrame(scene, List.of(cell), index, 512, 1, 1, 0);
+				var pose = KineticGeometry.pose(frame, cell);
+				check(Math.abs(pose.x() - 3.5) + Math.abs(pose.y() - 5.5) + Math.abs(pose.z() + 3.5) < 0.0001,
+					"Kinetic block misses its actual installation target");
+				check(Math.abs(pose.scale() - 1) < 0.0001, "Kinetic block is not full size at contact");
+			}
+		}
+		System.out.println("Kinetic poses verified: " + count + "; preview rotation/translation verified.");
 	}
 
 	private static int verifyHerobrine() {

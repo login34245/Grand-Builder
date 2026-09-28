@@ -11,7 +11,11 @@ public enum BuildEffectMode {
 	BUILDER_CHARGE("builder_charge", true, 72),
 	LIGHTNING("lightning", false, 0),
 	REVERSE("reverse", false, 0),
-	DISMANTLE("dismantle", false, 0);
+	DISMANTLE("dismantle", false, 0),
+	FLYING_BLOCKS("flying_blocks", false, 0),
+	REVERSE_COLLAPSE("reverse_collapse", false, 0),
+	ASSEMBLY_WORKSHOP("assembly_workshop", false, 0),
+	SCALE_MODEL("scale_model", false, 0);
 
 	private final String key;
 	private final boolean instantReveal;
@@ -33,6 +37,19 @@ public enum BuildEffectMode {
 
 	public boolean instantReveal() {
 		return instantReveal;
+	}
+
+	public boolean kinetic() {
+		return this == FLYING_BLOCKS || this == REVERSE_COLLAPSE || this == ASSEMBLY_WORKSHOP || this == SCALE_MODEL;
+	}
+
+	public int setupTicks() {
+		return switch (this) {
+			case FLYING_BLOCKS -> 12;
+			case REVERSE_COLLAPSE, ASSEMBLY_WORKSHOP -> 32;
+			case SCALE_MODEL -> 48;
+			default -> 0;
+		};
 	}
 
 	public double effectiveRate(BuildSpeed speed) {

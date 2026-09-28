@@ -1,4 +1,8 @@
 {
+  "subtitles.grand_builder.block_flight": "Blocks rush past",
+  "subtitles.grand_builder.rubble_pull": "Rubble shifts",
+  "subtitles.grand_builder.assembly_servo": "Assembly machinery whirs",
+  "subtitles.grand_builder.model_unfold": "Model unfolds",
   "effect.grand_builder.lightning": "Lightning Strike",
   "effect.grand_builder.reverse": "Reverse Build",
   "effect.grand_builder.dismantle": "Dismantle",
@@ -172,5 +176,17 @@
   "message.grand_builder.capture_saved_detailed": "Custom structure saved: %s blocks, size %sx%sx%s.",
   "message.grand_builder.capture_exported": "Exported as %s: %s file(s). Path: %s",
   "message.grand_builder.capture_export_failed": "Custom structure was saved for this session, but file export failed. Check the server log.",
-  "message.grand_builder.capture_tool_required": "Hold Builder Core or Builder Selector to save a custom structure."
+  "message.grand_builder.capture_tool_required": "Hold Builder Core or Builder Selector to save a custom structure.",
+  "effect.grand_builder.flying_blocks": "Flying Blocks",
+  "effect.grand_builder.reverse_collapse": "Reverse Collapse",
+  "effect.grand_builder.assembly_workshop": "Assembly Workshop",
+  "effect.grand_builder.scale_model": "From Model to Home",
+  "key.grand_builder.rotate_preview": "Rotate Preview Clockwise",
+  "key.grand_builder.move_preview_forward": "Move Preview Forward",
+  "key.grand_builder.move_preview_back": "Move Preview Back",
+  "key.grand_builder.move_preview_left": "Move Preview Left",
+  "key.grand_builder.move_preview_right": "Move Preview Right",
+  "key.grand_builder.move_preview_up": "Raise Preview",
+  "key.grand_builder.move_preview_down": "Lower Preview",
+  "message.grand_builder.preview_move_blocked": "Preview cannot move beyond the world height or allowed build radius."
 }

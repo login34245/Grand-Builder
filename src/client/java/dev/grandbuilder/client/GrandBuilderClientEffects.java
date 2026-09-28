@@ -5,6 +5,7 @@ import dev.grandbuilder.build.HerobrineTiming;
 import dev.grandbuilder.network.BuildEffectPayload;
 import dev.grandbuilder.network.HerobrinePlacementPayload;
 import dev.grandbuilder.network.LightningStrikePayload;
+import dev.grandbuilder.network.KineticBuildPayload;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -59,6 +60,9 @@ public final class GrandBuilderClientEffects {
 		private final List<Bolt> bolts = new ArrayList<>();
 		private int movingPhase;
 		private boolean blastTriggered;
+		private KineticBuildPayload kinetic;
+		private List<KineticBuildPayload.Cell> cells = List.of();
+		private int kineticElapsed;
 
 		private Scene(BuildEffectPayload payload) {
 			this.payload = payload;
@@ -83,6 +87,36 @@ public final class GrandBuilderClientEffects {
 	}
 
 	public record BoltFrame(double x, double y, double z, int sequence, float age, int contactTick, float opacity, boolean dismantling) {
+	}
+
+	public record KineticFrame(Frame scene, List<KineticBuildPayload.Cell> cells, int cursor, int budget,
+		int delay, float cycleAge, float setupRemaining) { }
+
+	public static void kinetic(KineticBuildPayload payload) {
+		Minecraft client = Minecraft.getInstance();
+		if (client.level == null || !client.level.dimension().identifier().equals(payload.dimension())) return;
+		Scene scene = SCENES.get(payload.sceneId());
+		if (scene == null) return;
+		scene.kinetic = payload;
+		if (!payload.cells().isEmpty()) scene.cells = payload.cells();
+		scene.kineticElapsed = 0;
+	}
+
+	public static List<KineticFrame> extractKinetic(float partialTick) {
+		List<Frame> frames = extract(partialTick);
+		List<KineticFrame> result = new ArrayList<>();
+		int index = 0;
+		for (Scene scene : SCENES.values()) {
+			Frame frame = frames.get(index++);
+			KineticBuildPayload p = scene.kinetic;
+			if (p == null || frame.revealing() || scene.payload.phaseId() == BuildEffectPayload.PHASE_STOP) continue;
+			boolean paused = scene.payload.phaseId() == BuildEffectPayload.PHASE_PAUSED;
+			float elapsed = scene.kineticElapsed + (paused ? 0 : partialTick);
+			float setup = Math.max(0, p.setupRemaining() - elapsed);
+			float cycle = Math.min(Math.max(1, p.delay()) - 0.001f, p.cycleAge() + Math.max(0, elapsed - p.setupRemaining()));
+			result.add(new KineticFrame(frame, scene.cells, p.cursor(), Math.max(1, p.budget()), Math.max(1, p.delay()), cycle, setup));
+		}
+		return List.copyOf(result);
 	}
 
 	private static final class Bolt {
@@ -202,6 +236,7 @@ public final class GrandBuilderClientEffects {
 			scene.previousProgress = scene.progress;
 			int phase = scene.payload.phaseId();
 			if (phase != BuildEffectPayload.PHASE_PAUSED) {
+				scene.kineticElapsed++;
 				scene.age++;
 				scene.motionAge++;
 				if (phase == BuildEffectPayload.PHASE_ARRIVAL) {

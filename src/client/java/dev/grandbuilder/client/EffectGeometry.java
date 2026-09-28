@@ -32,6 +32,7 @@ public final class EffectGeometry {
 			case AURORA_WEAVE -> aurora(mesh, frame);
 			case BUILDER_CHARGE -> builderCharge(mesh, frame);
 			case REVERSE -> directional(mesh, frame);
+			case FLYING_BLOCKS, REVERSE_COLLAPSE, ASSEMBLY_WORKSHOP, SCALE_MODEL -> KineticGeometry.emit(frame, mesh);
 			default -> { }
 		}
 	}
@@ -541,7 +542,7 @@ public final class EffectGeometry {
 	private static double fract(double value) { return value-Math.floor(value); }
 	private static double mix(double a, double b, double t) { return a+(b-a)*t; }
 
-	private static final class Mesh {
+	static final class Mesh {
 		private final Sink sink;
 		private final float opacity;
 		private final ArrayDeque<Matrix4f> matrices = new ArrayDeque<>();
@@ -549,12 +550,12 @@ public final class EffectGeometry {
 		private final Vector3f point = new Vector3f();
 
 		private Mesh(Sink sink, float opacity) { this.sink=sink; this.opacity=opacity; }
-		private void push(double x, double y, double z) {
+		void push(double x, double y, double z) {
 			matrices.push(matrix);
 			matrix = new Matrix4f(matrix).translate((float)x, (float)y, (float)z);
 		}
-		private void pop() { matrix=matrices.pop(); }
-		private void rotate(double x, double y, double z) { matrix.rotateXYZ((float)x, (float)y, (float)z); }
+		void pop() { matrix=matrices.pop(); }
+		void rotate(double x, double y, double z) { matrix.rotateXYZ((float)x, (float)y, (float)z); }
 		private void scale(double value) { matrix.scale((float)value); }
 		private void vertex(Material material, double x, double y, double z, int rgb, double alpha) {
 			matrix.transformPosition(point.set((float)x, (float)y, (float)z));
@@ -570,7 +571,7 @@ public final class EffectGeometry {
 			vertex(Material.GLOW,ax,ay,az,rgb,bottom); vertex(Material.GLOW,bx,by,bz,rgb,bottom);
 			vertex(Material.GLOW,cx,cy,cz,rgb,top); vertex(Material.GLOW,dx,dy,dz,rgb,top);
 		}
-		private void torus(double radius, double thickness, double rotation, int rgb, double alpha) {
+		void torus(double radius, double thickness, double rotation, int rgb, double alpha) {
 			for (int i=0;i<72;i++) {
 				double a=i*TAU/72+rotation, b=(i+1)*TAU/72+rotation;
 				for (int j=0;j<4;j++) {
@@ -620,7 +621,7 @@ public final class EffectGeometry {
 		private double[] spherePoint(double radius, double latitude, double longitude) {
 			return new double[] {radius*Math.cos(latitude)*Math.cos(longitude), radius*Math.sin(latitude), radius*Math.cos(latitude)*Math.sin(longitude)};
 		}
-		private void tube(double ax,double ay,double az,double bx,double by,double bz,double r,int rgb,Material mat,double alpha) {
+		void tube(double ax,double ay,double az,double bx,double by,double bz,double r,int rgb,Material mat,double alpha) {
 			Vector3f direction=new Vector3f((float)(bx-ax),(float)(by-ay),(float)(bz-az));
 			if(direction.lengthSquared()<0.000001f) return;
 			direction.normalize();
@@ -634,7 +635,7 @@ public final class EffectGeometry {
 					new double[]{bx+t[0],by+t[1],bz+t[2]},new double[]{ax+t[0],ay+t[1],az+t[2]},rgb,alpha);
 			}
 		}
-		private void box(double x,double y,double z,int rgb,Material mat,double alpha) {
+		void box(double x,double y,double z,int rgb,Material mat,double alpha) {
 			double[][] p={{-x,-y,-z},{x,-y,-z},{x,y,-z},{-x,y,-z},{-x,-y,z},{x,-y,z},{x,y,z},{-x,y,z}};
 			int[][] faces={{0,1,2,3},{5,4,7,6},{4,0,3,7},{1,5,6,2},{3,2,6,7},{4,5,1,0}};
 			for(int i=0;i<faces.length;i++) {

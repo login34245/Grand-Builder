@@ -8,10 +8,13 @@ import dev.grandbuilder.network.BuildEstimateRequestPayload;
 import dev.grandbuilder.network.BuildRequestPayload;
 import dev.grandbuilder.network.LightningStrikePayload;
 import dev.grandbuilder.network.HerobrinePlacementPayload;
+import dev.grandbuilder.network.KineticBuildPayload;
+import dev.grandbuilder.network.BuildControlAction;
 import dev.grandbuilder.network.BuildStatusPayload;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -182,6 +185,7 @@ public final class AnimatedBuildManager {
 			config
 		);
 		PENDING_PREVIEW_BY_PLAYER.put(player.getUUID(), preview);
+		sendBuildStatus(player, false);
 
 		BuildSpeed speed = getSpeed(player.getUUID());
 		long ticksLeft = estimateTicks(preview.estimatedBlocks, speed, preview.effectMode(), preview.options);
@@ -237,6 +241,11 @@ public final class AnimatedBuildManager {
 			player.displayClientMessage(Component.translatable("message.grand_builder.confirm_requires_sneak"), true);
 			return;
 		}
+		BuildBounds confirmBounds = computeBuildBounds(preview.origin, preview.facing, preview.blocks);
+		if (!fitsWorldHeight(player.level(), confirmBounds) || !isWithinRadius(player.blockPosition(), confirmBounds, config.maxBuildRadius)) {
+			player.displayClientMessage(Component.translatable("message.grand_builder.preview_move_blocked"), true);
+			return;
+		}
 		if (ACTIVE_BUILDS.size() >= config.maxConcurrentBuilds) {
 			player.displayClientMessage(Component.translatable("message.grand_builder.concurrent_limit", config.maxConcurrentBuilds), true);
 			return;
@@ -280,6 +289,43 @@ public final class AnimatedBuildManager {
 		if (PENDING_PREVIEW_BY_PLAYER.remove(player.getUUID()) != null) {
 			player.displayClientMessage(Component.translatable("message.grand_builder.preview_canceled"), true);
 		}
+	}
+
+	public static void adjustPreview(ServerPlayer player, BuildControlAction action) {
+		if (!checkCanUse(player, true, true)) return;
+		PendingPreview preview = PENDING_PREVIEW_BY_PLAYER.get(player.getUUID());
+		if (preview == null || !preview.dimensionKey.equals(player.level().dimension())) return;
+		long now = player.level().getGameTime();
+		if (now != preview.lastEditTick) preview.editsThisTick.clear();
+		if (preview.editsThisTick.size() >= 3 || !preview.editsThisTick.add(action)) return;
+		preview.lastEditTick = now;
+		PreviewPlacement placement = new PreviewPlacement(preview.origin, preview.facing, preview.pivot);
+		Direction view = player.getDirection();
+		placement = switch (action) {
+			case ROTATE_PREVIEW -> placement.rotate();
+			case MOVE_PREVIEW_FORWARD -> placement.move(view);
+			case MOVE_PREVIEW_BACK -> placement.move(view.getOpposite());
+			case MOVE_PREVIEW_LEFT -> placement.move(view.getCounterClockWise());
+			case MOVE_PREVIEW_RIGHT -> placement.move(view.getClockWise());
+			case MOVE_PREVIEW_UP -> placement.move(Direction.UP);
+			case MOVE_PREVIEW_DOWN -> placement.move(Direction.DOWN);
+			default -> placement;
+		};
+		GrandBuilderConfig config = GrandBuilderConfig.get();
+		BuildBounds bounds = computeBuildBounds(placement.origin(), placement.facing(), preview.blocks);
+		if (!fitsWorldHeight(player.level(), bounds) || !isWithinRadius(player.blockPosition(), bounds, config.maxBuildRadius)) {
+			preview.lastEditTick = now;
+			player.displayClientMessage(Component.translatable("message.grand_builder.preview_move_blocked"), true);
+			return;
+		}
+		PendingPreview updated = new PendingPreview(player.level(), preview.dimensionKey, placement.origin(), placement.facing(),
+			preview.structureName, preview.blocks, preview.effectMode, preview.options, config.previewSampleCap, config);
+		updated.pivot = placement.pivot();
+		updated.lastEditTick = now;
+		updated.tickCounter = preview.tickCounter;
+		updated.editsThisTick.addAll(preview.editsThisTick);
+		PENDING_PREVIEW_BY_PLAYER.put(player.getUUID(), updated);
+		sendBuildStatus(player, false);
 	}
 
 	public static void tryStartBuild(ServerPlayer player) {
@@ -1610,7 +1656,7 @@ public final class AnimatedBuildManager {
 			return 13L + (visual == BuildEffectMode.BUILDER_CHARGE ? 72L + estimateTicks(remainingBlocks, speed)
 				: estimateTicks(remainingBlocks, speed, visual));
 		}
-		return estimateTicks(remainingBlocks, speed);
+		return effectMode.setupTicks() + estimateTicks(remainingBlocks, speed);
 	}
 
 	private static double smoothClockworkCycles(double cycles) {
@@ -1823,6 +1869,9 @@ public final class AnimatedBuildManager {
 		private int sampleCursor;
 		private int conflictCursor;
 		private int tickCounter;
+		private BlockPos pivot;
+		private long lastEditTick = Long.MIN_VALUE / 2;
+		private final Set<BuildControlAction> editsThisTick = EnumSet.noneOf(BuildControlAction.class);
 
 		private PendingPreview(ServerLevel level, ResourceKey<Level> dimensionKey, BlockPos origin, Direction facing, Component structureName, List<GrandPalaceBlueprint.RelativeBlock> blocks, BuildEffectMode effectMode, BuildOptions options, int sampleCap, GrandBuilderConfig config) {
 			this.dimensionKey = dimensionKey;
@@ -1868,6 +1917,7 @@ public final class AnimatedBuildManager {
 			this.maxY = localMaxY;
 			this.minZ = localMinZ;
 			this.maxZ = localMaxZ;
+			this.pivot = origin.offset(Math.floorDiv(localMinX + localMaxX, 2), 0, Math.floorDiv(localMinZ + localMaxZ, 2));
 
 			List<Integer> previewCandidates = new ArrayList<>(blocks.size());
 			for (int i = 0; i < blocks.size(); i++) {
@@ -2124,6 +2174,9 @@ public final class AnimatedBuildManager {
 		private int dismantleHoldTicks;
 		private boolean dismantleDetonated;
 		private boolean destructiveDetonated;
+		private List<KineticBuildPayload.Cell> kineticCells;
+		private List<BlockPos> kineticChunks;
+		private final Map<UUID, Integer> kineticModelSent = new HashMap<>();
 		private final Map<BlockPos, SnapshotBlock> dismantleOriginals = new HashMap<>();
 		private final Map<BlockPos, SnapshotBlock> dismantleCleanup = new HashMap<>();
 		private final Map<BlockPos, CompoundTag> dismantleExpectedNbt = new HashMap<>();
@@ -2184,6 +2237,67 @@ public final class AnimatedBuildManager {
 			sendScene(level, phase, duration, dismantleDetonated ? Math.max(0, effectTick - 72) : effectTick,
 				dismantleDetonated ? revealShakeIntensity(visual) : arrivalShakeIntensity(visual));
 			if (herobrinePlacement != null) sendHerobrine(level);
+			if (effectMode.kinetic()) sendKinetic(level);
+		}
+
+		private void sendKinetic(ServerLevel level) {
+			if (kineticCells == null) {
+				if (!kineticChunksReady(level, GrandBuilderConfig.get())) return;
+				Set<Long> opaque = new HashSet<>();
+				for (int i = 0; i < totalBlocks; i++) {
+					GrandPalaceBlueprint.RelativeBlock block = blockAt(i);
+					if (!isTerrainOperation(block.stage()) && block.state().isSolidRender()) opaque.add(transform(origin, facing, block).asLong());
+				}
+				List<Integer> candidates = new ArrayList<>();
+				for (int i = 0; i < totalBlocks; i++) {
+					GrandPalaceBlueprint.RelativeBlock block = blockAt(i);
+					BlockPos target = transform(origin, facing, block);
+					boolean enclosed = block.state().isSolidRender();
+					if (enclosed) for (Direction side : Direction.values()) {
+						if (!opaque.contains(target.relative(side).asLong())) { enclosed = false; break; }
+					}
+					if (!enclosed && !isTerrainOperation(block.stage()) && hasPlacementVisual(level, block)
+						&& checkPlacement(level, block, GrandBuilderConfig.get()) == PlacementResult.READY) candidates.add(i);
+				}
+				int stride = Math.max(1, (candidates.size() + KineticBuildPayload.MAX_CELLS - 1) / KineticBuildPayload.MAX_CELLS);
+				List<KineticBuildPayload.Cell> cells = new ArrayList<>();
+				for (int i = 0; i < candidates.size(); i += stride) {
+					int index = candidates.get(i);
+					GrandPalaceBlueprint.RelativeBlock block = blockAt(index);
+					cells.add(new KineticBuildPayload.Cell(transform(origin, facing, block), Block.getId(rotateState(block.state(), facing)), index));
+				}
+				kineticCells = List.copyOf(cells);
+			}
+			BuildSpeed speed = getSpeed(ownerId);
+			Set<UUID> visible = new HashSet<>();
+			double centerX = (effectBounds.minX() + effectBounds.maxX() + 1.0) * 0.5;
+			double centerY = (effectBounds.minY() + effectBounds.maxY() + 1.0) * 0.5;
+			double centerZ = (effectBounds.minZ() + effectBounds.maxZ() + 1.0) * 0.5;
+			for (ServerPlayer viewer : level.players()) {
+				if (viewer.distanceToSqr(centerX, centerY, centerZ) > 256.0 * 256.0
+					|| !ServerPlayNetworking.canSend(viewer, KineticBuildPayload.TYPE)) continue;
+				visible.add(viewer.getUUID());
+				boolean model = !kineticModelSent.containsKey(viewer.getUUID()) || effectTick - kineticModelSent.get(viewer.getUUID()) >= 200;
+				if (model) kineticModelSent.put(viewer.getUUID(), effectTick);
+				ServerPlayNetworking.send(viewer, new KineticBuildPayload(sceneId, dimensionKey.identifier(), placedBlocks(),
+					BuildCadence.budget(speed.blocksPerCycle(), GrandBuilderConfig.get().maxBlocksPerTick), Math.max(1, speed.tickDelay()),
+					tickDelayCounter, Math.max(0, effectMode.setupTicks() - effectTick), model ? kineticCells : List.of()));
+			}
+			kineticModelSent.keySet().retainAll(visible);
+		}
+
+		private boolean kineticChunksReady(ServerLevel level, GrandBuilderConfig config) {
+			if (!config.pauseWhenChunksMissing) return true;
+			if (kineticChunks == null) {
+				Set<BlockPos> chunks = new HashSet<>();
+				for (int i = 0; i < totalBlocks; i++) {
+					BlockPos target = transform(origin, facing, blockAt(i));
+					if (level.isInWorldBounds(target)) chunks.add(new BlockPos(target.getX() & ~15, 0, target.getZ() & ~15));
+				}
+				kineticChunks = List.copyOf(chunks);
+			}
+			for (BlockPos chunk : kineticChunks) if (!level.isLoaded(chunk)) return false;
+			return true;
 		}
 
 		private void sendScene(ServerLevel level, int phase, int duration, int age, float power) {
@@ -2210,6 +2324,13 @@ public final class AnimatedBuildManager {
 			if (paused || pausedByOffline) {
 				restoreClockworkTime(level);
 				waitingForChunks = false;
+				return false;
+			}
+			if (effectMode.kinetic() && effectTick < effectMode.setupTicks()) {
+				if (!kineticChunksReady(level, config)) { waitingForChunks = true; return false; }
+				waitingForChunks = false;
+				tickBuildEffect(level);
+				if (effectTick == effectMode.setupTicks()) syncScene(level, false);
 				return false;
 			}
 			if (effectMode.instantReveal()) {
@@ -2250,6 +2371,7 @@ public final class AnimatedBuildManager {
 
 			int attemptsBudget = BuildCadence.budget(speed.blocksPerCycle(), config.maxBlocksPerTick);
 			placeBudgetedBlocks(level, attemptsBudget, config);
+			if (effectMode.kinetic()) sendKinetic(level);
 			boolean finished = dryCursor >= dryBlocks.size() && fluidCursor >= fluidBlocks.size();
 			return finished && (effectMode != BuildEffectMode.DISMANTLE || restoreDismantleCleanup(level));
 		}
@@ -2646,6 +2768,18 @@ public final class AnimatedBuildManager {
 					}
 					if (effectTick == 1) level.playSound(null, center, SoundEvents.FIREWORK_ROCKET_LAUNCH, SoundSource.BLOCKS, 0.85f, 0.65f);
 				}
+				case FLYING_BLOCKS -> {
+					if (effectTick % 16 == 1) level.playSound(null, center, GrandBuilderMod.BLOCK_FLIGHT, SoundSource.BLOCKS, 0.5f, 0.9f);
+				}
+				case REVERSE_COLLAPSE -> {
+					if (effectTick % 14 == 1) level.playSound(null, center, GrandBuilderMod.RUBBLE_PULL, SoundSource.BLOCKS, 0.65f, 0.9f + (effectTick % 3) * 0.08f);
+				}
+				case ASSEMBLY_WORKSHOP -> {
+					if (effectTick % 20 == 1) level.playSound(null, center, GrandBuilderMod.ASSEMBLY_SERVO, SoundSource.BLOCKS, 0.55f, 0.9f);
+				}
+				case SCALE_MODEL -> {
+					if (effectTick == 1 || effectTick == 24) level.playSound(null, center, GrandBuilderMod.MODEL_UNFOLD, SoundSource.BLOCKS, 0.6f, 0.95f);
+				}
 				default -> { }
 			}
 		}
@@ -2785,7 +2919,7 @@ public final class AnimatedBuildManager {
 					GrandBuilderConfig.get().maxBlocksPerTick, tickDelayCounter);
 			}
 			return BuildCadence.estimateTicks(remainingBlocks(), speed.blocksPerCycle(), speed.tickDelay(),
-				GrandBuilderConfig.get().maxBlocksPerTick, tickDelayCounter);
+				GrandBuilderConfig.get().maxBlocksPerTick, tickDelayCounter) + Math.max(0, effectMode.setupTicks() - effectTick);
 		}
 
 		private double progressPercent() {

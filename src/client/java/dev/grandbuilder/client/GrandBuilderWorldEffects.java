@@ -19,6 +19,7 @@ import net.fabricmc.fabric.api.client.rendering.v1.world.WorldExtractionContext;
 import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderContext;
 import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderEvents;
 import net.minecraft.client.renderer.MultiBufferSource;
+import net.minecraft.client.renderer.rendertype.RenderTypes;
 import net.minecraft.client.renderer.rendertype.RenderSetup;
 import net.minecraft.client.renderer.rendertype.RenderType;
 import net.minecraft.world.phys.Vec3;
@@ -27,6 +28,7 @@ public final class GrandBuilderWorldEffects {
 	private static final RenderStateDataKey<List<GrandBuilderClientEffects.Frame>> SCENES = RenderStateDataKey.create();
 	private static final RenderStateDataKey<List<GrandBuilderClientEffects.ActorFrame>> ACTORS = RenderStateDataKey.create();
 	private static final RenderStateDataKey<List<GrandBuilderClientEffects.BoltFrame>> BOLTS = RenderStateDataKey.create();
+	private static final RenderStateDataKey<List<KineticBlockRenderer.BlockFrame>> BLOCKS = RenderStateDataKey.create();
 	private static final RenderType SOLID = layer("effect_solid", false, true);
 	private static final RenderType VEIL = layer("effect_veil", false, false);
 	private static final RenderType GLOW = layer("effect_glow", true, false);
@@ -41,6 +43,9 @@ public final class GrandBuilderWorldEffects {
 		STORAGE.put(SOLID, new ByteBufferBuilder(256 * 1024));
 		STORAGE.put(VEIL, new ByteBufferBuilder(128 * 1024));
 		STORAGE.put(GLOW, new ByteBufferBuilder(512 * 1024));
+		STORAGE.put(RenderTypes.solidMovingBlock(), new ByteBufferBuilder(1024 * 1024));
+		STORAGE.put(RenderTypes.cutoutMovingBlock(), new ByteBufferBuilder(512 * 1024));
+		STORAGE.put(RenderTypes.translucentMovingBlock(), new ByteBufferBuilder(512 * 1024));
 		buffers = MultiBufferSource.immediateWithBuffers(STORAGE, FALLBACK);
 		WorldRenderEvents.END_EXTRACTION.register(GrandBuilderWorldEffects::extract);
 		WorldRenderEvents.BEFORE_TRANSLUCENT.register(GrandBuilderWorldEffects::draw);
@@ -73,12 +78,14 @@ public final class GrandBuilderWorldEffects {
 		context.worldState().setData(SCENES, GrandBuilderClientEffects.extract(partialTick));
 		context.worldState().setData(ACTORS, GrandBuilderClientEffects.extractActors(partialTick));
 		context.worldState().setData(BOLTS, GrandBuilderClientEffects.extractBolts(partialTick));
+		context.worldState().setData(BLOCKS, KineticBlockRenderer.extract(partialTick, context.worldState().cameraRenderState.pos));
 	}
 
 	private static void draw(WorldRenderContext context) {
 		List<GrandBuilderClientEffects.Frame> frames = context.worldState().getData(SCENES);
 		List<GrandBuilderClientEffects.ActorFrame> actors = context.worldState().getData(ACTORS);
 		List<GrandBuilderClientEffects.BoltFrame> bolts = context.worldState().getData(BOLTS);
+		List<KineticBlockRenderer.BlockFrame> blocks = context.worldState().getData(BLOCKS);
 		if (frames == null || actors == null || bolts == null || (frames.isEmpty() && actors.isEmpty() && bolts.isEmpty())) return;
 		Vec3 camera = context.worldState().cameraRenderState.pos;
 		VertexConsumer solid = buffers.getBuffer(SOLID);
@@ -114,5 +121,7 @@ public final class GrandBuilderWorldEffects {
 		buffers.endBatch(SOLID);
 		buffers.endBatch(VEIL);
 		buffers.endBatch(GLOW);
+		if (blocks != null) KineticBlockRenderer.draw(blocks, matrices, camera, buffers);
+		buffers.endBatch();
 	}
 }

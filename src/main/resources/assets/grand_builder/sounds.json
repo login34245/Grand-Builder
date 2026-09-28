@@ -1,4 +1,8 @@
 {
+  "effect.block_flight": {"subtitle": "subtitles.grand_builder.block_flight", "sounds": ["grand_builder:effects/block_flight"]},
+  "effect.rubble_pull": {"subtitle": "subtitles.grand_builder.rubble_pull", "sounds": ["grand_builder:effects/rubble_pull"]},
+  "effect.assembly_servo": {"subtitle": "subtitles.grand_builder.assembly_servo", "sounds": ["grand_builder:effects/assembly_servo"]},
+  "effect.model_unfold": {"subtitle": "subtitles.grand_builder.model_unfold", "sounds": ["grand_builder:effects/model_unfold"]},
   "effect.clock_tick": {
     "subtitle": "subtitles.grand_builder.clock_tick",
     "sounds": [

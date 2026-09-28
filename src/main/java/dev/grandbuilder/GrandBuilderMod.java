@@ -19,6 +19,7 @@ import dev.grandbuilder.network.BuildEstimatePayload;
 import dev.grandbuilder.network.BuildEstimateRequestPayload;
 import dev.grandbuilder.network.LightningStrikePayload;
 import dev.grandbuilder.network.HerobrinePlacementPayload;
+import dev.grandbuilder.network.KineticBuildPayload;
 import dev.grandbuilder.network.BuildRequestPayload;
 import dev.grandbuilder.network.BuildSetSpeedPayload;
 import dev.grandbuilder.network.BuildStatusPayload;
@@ -60,6 +61,10 @@ public class GrandBuilderMod implements ModInitializer {
 	public static final ResourceKey<Item> STRUCTURE_SELECTOR_KEY = ResourceKey.create(Registries.ITEM, STRUCTURE_SELECTOR_ID);
 	public static final ResourceKey<CreativeModeTab> CREATIVE_TAB_KEY = ResourceKey.create(Registries.CREATIVE_MODE_TAB, id("tab"));
 	public static final SoundEvent CLOCK_TICK = SoundEvent.createVariableRangeEvent(CLOCK_TICK_ID);
+	public static final SoundEvent BLOCK_FLIGHT = SoundEvent.createVariableRangeEvent(id("effect.block_flight"));
+	public static final SoundEvent RUBBLE_PULL = SoundEvent.createVariableRangeEvent(id("effect.rubble_pull"));
+	public static final SoundEvent ASSEMBLY_SERVO = SoundEvent.createVariableRangeEvent(id("effect.assembly_servo"));
+	public static final SoundEvent MODEL_UNFOLD = SoundEvent.createVariableRangeEvent(id("effect.model_unfold"));
 
 	public static final Item STRUCTURE_CORE = new StructureCoreItem(new Item.Properties()
 		.setId(STRUCTURE_CORE_KEY)
@@ -77,6 +82,10 @@ public class GrandBuilderMod implements ModInitializer {
 		Registry.register(BuiltInRegistries.ITEM, STRUCTURE_CORE_ID, STRUCTURE_CORE);
 		Registry.register(BuiltInRegistries.ITEM, STRUCTURE_SELECTOR_ID, STRUCTURE_SELECTOR);
 		Registry.register(BuiltInRegistries.SOUND_EVENT, CLOCK_TICK_ID, CLOCK_TICK);
+		Registry.register(BuiltInRegistries.SOUND_EVENT, BLOCK_FLIGHT.location(), BLOCK_FLIGHT);
+		Registry.register(BuiltInRegistries.SOUND_EVENT, RUBBLE_PULL.location(), RUBBLE_PULL);
+		Registry.register(BuiltInRegistries.SOUND_EVENT, ASSEMBLY_SERVO.location(), ASSEMBLY_SERVO);
+		Registry.register(BuiltInRegistries.SOUND_EVENT, MODEL_UNFOLD.location(), MODEL_UNFOLD);
 		Registry.register(BuiltInRegistries.CREATIVE_MODE_TAB, CREATIVE_TAB_KEY, FabricItemGroup.builder()
 			.title(Component.translatable("itemGroup.grand_builder.main"))
 			.icon(() -> new ItemStack(STRUCTURE_CORE))
@@ -97,6 +106,7 @@ public class GrandBuilderMod implements ModInitializer {
 		PayloadTypeRegistry.playC2S().register(CaptureRequestPayload.TYPE, CaptureRequestPayload.CODEC);
 		PayloadTypeRegistry.playS2C().register(BuildEffectPayload.TYPE, BuildEffectPayload.CODEC);
 		PayloadTypeRegistry.playS2C().register(HerobrinePlacementPayload.TYPE, HerobrinePlacementPayload.CODEC);
+		PayloadTypeRegistry.playS2C().register(KineticBuildPayload.TYPE, KineticBuildPayload.CODEC);
 		PayloadTypeRegistry.playS2C().register(BuildStatusPayload.TYPE, BuildStatusPayload.CODEC);
 		PayloadTypeRegistry.playS2C().register(StructureListPayload.TYPE, StructureListPayload.CODEC);
 
@@ -148,6 +158,8 @@ public class GrandBuilderMod implements ModInitializer {
 				}
 				case TOGGLE_TERRAIN -> AnimatedBuildManager.toggleTerrainAdaptation(context.player());
 				case REQUEST_STRUCTURE_LIST -> sendStructureList(context.player());
+				case ROTATE_PREVIEW, MOVE_PREVIEW_FORWARD, MOVE_PREVIEW_BACK, MOVE_PREVIEW_LEFT,
+					MOVE_PREVIEW_RIGHT, MOVE_PREVIEW_UP, MOVE_PREVIEW_DOWN -> AnimatedBuildManager.adjustPreview(context.player(), action);
 			}
 		}));
 
