@@ -39,6 +39,8 @@ This file is a handoff for future AI agents working on this repository, includin
 - `Meteor Forge` / `Метеорная ковка`: instant reveal with meteor/forge-style effects.
 - `Clockwork Drive` / `Заводной ход`: timed clockwork build mode.
 - `Aurora Weave` / `Полярная вязь`: ambient aurora-style build mode.
+- `Herobrine` / `Херобрин`: a white-eyed, voxel-faced 3D builder teleports beside the next real block and places it with a synchronized arm swing; short translucent afterimages mark his previous positions.
+- `Builder Charge` / `Строительный заряд`: a finned metal charge follows an arcing flight path, flashes a red countdown light, then bursts into a 3D pressure shell, radial streaks and flying casing panels. A fitted assembly cage and rising scan outline the instant house reveal. The explosion is visual only and must never damage terrain or entities.
 
 ## Clockwork Drive / Заводной ход
 
@@ -85,7 +87,7 @@ Copy-Item -LiteralPath $jar -Destination (Join-Path $modsDir 'grand_builder-1.1.
 - `CameraEffectsMixin` applies brief render-only shake/roll. It must never change the player's aim or stored yaw/pitch. The HUD only supplies a short low-opacity exposure flash.
 - Rotation and phase age are separate so the reveal transition does not reset the moving objects. Pause freezes motion; dimension changes and disconnects clear scenes.
 - Experimental geometry no longer uses the server's old particle-built UFO/rings/curtains or per-block particle floods. Standard-mode placement particles, clock ticks, and sound accents remain.
-- `verifyEffectGeometry` is part of `check` and covers 450 mode/phase/size/frame samples, finite coordinates, quad grouping, bounded mesh counts, 3D extents, motion, distinct scenes, and opacity.
+- `verifyEffectGeometry` is part of `check` and covers 540 mode/phase/size/frame samples plus 180 actor samples, finite coordinates, quad grouping, bounded mesh counts, 3D extents, motion, distinct scenes, opacity, stable network mode IDs, placement cadence and held-block disappearance at contact.
 - Verified in an isolated integrated Minecraft 1.21.11 test world: all five scenes, arrival/reveal transitions, two viewing angles, 20 captured frames, and successful custom shader compilation. Not tested with Iris shader packs, remote multiplayer, or other rendering mods. Additive blending uses premultiplied RGB in the fragment shader; omitting this makes transparent beams opaque white.
 - Development `runClient` may hit a Windows Gradle shortened-classpath loader conflict. An explicit Java argument file with the full classpath works; argument files on this machine need Windows-1251 encoding for Cyrillic paths. QA harnesses under `build/` and test worlds under `run/` are ignored and must not enter the shipped jar.
 
@@ -96,3 +98,13 @@ Copy-Item -LiteralPath $jar -Destination (Join-Path $modsDir 'grand_builder-1.1.
 - If committing, keep commits focused and do not revert unrelated user changes.
 - The user has been using tag/release `v1.1.0`; previous updates force-moved this tag and replaced the release asset.
 - When updating the release body, mention user-facing changes clearly in Russian.
+
+## Placement Actor (September 2026)
+
+- Append new enum modes without reordering existing IDs. Herobrine is ID 6; Builder Charge is ID 7.
+- `HerobrineTiming` defines a 2-24 tick single-block cycle based on selected speed. Server placement happens at `contactTick`, not on packet arrival. Speed labels and ETA use this actual cadence.
+- `HerobrinePlacementPayload` carries scene ID, dimension, monotonic placement sequence, exact target, actor position, block state ID, duration and cycle age. Register it on both client and server. Held cubes use the target block's map color; they are stylized geometry, not the full textured block model.
+- The server handles air cleanup, already-present ordinary blocks and forbidden replacements without fake gestures. Placement still uses the shared chunk, replacement and block-entity guards. Pauses and owner-offline pauses freeze the actor; rollback stops its scene; disconnect/dimension changes clear it.
+- Actor render state belongs to its bounded parent scene, with at most two 6-tick afterimages. Afterimages use the non-depth-writing translucent material. Do not spawn real NPC entities, modify player aim, or fill the world with particle silhouettes.
+- Builder Charge waits 72 active ticks before the single-server-tick reveal and uses a 44-tick visual aftermath. Speed controls are hidden. Missing target chunks still pause installation, and rollback uses the normal snapshots.
+- Integrated Minecraft QA verified Herobrine's 36 real placements at exact contact ticks, 180 active ticks at Normal speed, pause/resume, protected chest and air cleanup. Charge QA verified all 1602 test-structure blocks appearing at tick 72 with a neighboring sentinel block untouched. Captured arrival, placement and blast frames from two views. Iris/remote multiplayer remain untested.

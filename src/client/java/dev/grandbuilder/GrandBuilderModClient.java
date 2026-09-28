@@ -10,6 +10,7 @@ import dev.grandbuilder.client.StructureListClientState;
 import dev.grandbuilder.network.BuildControlAction;
 import dev.grandbuilder.network.BuildControlPayload;
 import dev.grandbuilder.network.BuildEffectPayload;
+import dev.grandbuilder.network.HerobrinePlacementPayload;
 import dev.grandbuilder.network.BuildStatusPayload;
 import dev.grandbuilder.network.StructureListPayload;
 import net.fabricmc.api.ClientModInitializer;
@@ -60,6 +61,9 @@ public class GrandBuilderModClient implements ClientModInitializer {
 			context.client().execute(() -> GrandBuilderClientEffects.trigger(payload))
 		);
 		HudRenderCallback.EVENT.register(GrandBuilderClientEffects::render);
+		ClientPlayNetworking.registerGlobalReceiver(HerobrinePlacementPayload.TYPE, (payload, context) ->
+			context.client().execute(() -> GrandBuilderClientEffects.place(payload))
+		);
 		GrandBuilderWorldEffects.initialize();
 
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {

@@ -28,8 +28,198 @@ public final class EffectGeometry {
 			case METEOR_FORGE -> meteor(mesh, frame);
 			case CLOCKWORK_GRID -> clockwork(mesh, frame);
 			case AURORA_WEAVE -> aurora(mesh, frame);
+			case BUILDER_CHARGE -> builderCharge(mesh, frame);
 			default -> { }
 		}
+	}
+
+	public static void emitHerobrine(GrandBuilderClientEffects.ActorFrame f, Sink sink) {
+		double appear = ease(f.age() / 0.8);
+		Mesh m = new Mesh(sink, f.opacity() * (float) (0.55 + appear * 0.45));
+		Material body = f.ghost() ? Material.VEIL : Material.SOLID;
+		double yaw = Math.atan2(f.targetX(), f.targetZ());
+		double reach = f.age() < f.contactTick() ? ease(f.age() / f.contactTick())
+			: 1 - ease((f.age() - f.contactTick()) / Math.max(1, f.duration() - f.contactTick()));
+		m.push(0, 0, 0);
+		m.rotate(0, yaw, 0);
+		for (int leg = -1; leg <= 1; leg += 2) {
+			m.push(leg * 0.125, 0.375, 0);
+			m.box(0.125, 0.375, 0.125, 0x4145A0, body, 1);
+			m.push(0, -0.32, 0.01);
+			m.box(0.126, 0.055, 0.136, 0x44434A, body, 1);
+			m.pop();
+			m.pop();
+		}
+		m.push(0, 1.125, 0);
+		m.box(0.25, 0.375, 0.125, 0x1B9FAD, body, 1);
+		m.push(0, 0.26, 0.127);
+		m.box(0.07, 0.10, 0.004, 0xB58262, body, 1);
+		m.pop();
+		for (int i = -1; i <= 1; i += 2) {
+			m.push(i * 0.19, -0.13, 0.128);
+			m.box(0.026, 0.16, 0.004, 0x178492, body, 1);
+			m.pop();
+		}
+		m.pop();
+		for (int arm = -1; arm <= 1; arm += 2) {
+			m.push(arm * 0.375, 1.40, 0);
+			m.rotate(arm == -1 ? -1.32 * reach : -0.14, 0, arm * 0.035);
+			m.push(0, -0.13, 0);
+			m.box(0.125, 0.17, 0.125, 0x1995A4, body, 1);
+			m.pop();
+			m.push(0, -0.49, 0);
+			m.box(0.125, 0.20, 0.125, 0xB88769, body, 1);
+			m.pop();
+			if (arm == -1 && !f.ghost() && f.age() < f.contactTick()) {
+				m.push(0, -0.74, 0.06);
+				m.rotate(0.12, 0.25, 0);
+				m.box(0.21, 0.21, 0.21, f.blockColor(), Material.SOLID, 1);
+				m.pop();
+			}
+			m.pop();
+		}
+		m.push(0, 1.75, 0);
+		m.rotate(0.12 + reach * 0.10, 0, 0);
+		m.box(0.25, 0.25, 0.25, 0x473329, body, 1);
+		int[] skin = {0xB78564, 0xBD8B6B, 0xC49473, 0xAA7758};
+		for (int row = 0; row < 8; row++) {
+			for (int col = 0; col < 8; col++) {
+				int color = skin[(row + col * 3) % skin.length];
+				if (row < 2 || (row == 2 && (col == 0 || col == 7))) color = (col % 3 == 0) ? 0x39281F : 0x4B3428;
+				if (row == 4 && (col == 3 || col == 4)) color = 0x956048;
+				if (row >= 6 && col >= 2 && col <= 5) color = row == 6 && (col == 3 || col == 4) ? 0x6A4334 : 0x50362A;
+				boolean eye = row == 3 && (col == 1 || col == 2 || col == 5 || col == 6);
+				m.quad(eye ? Material.GLOW : body,
+					new double[] {-0.25 + col * 0.0625, 0.25 - row * 0.0625, 0.252},
+					new double[] {-0.25 + (col+1) * 0.0625, 0.25 - row * 0.0625, 0.252},
+					new double[] {-0.25 + (col+1) * 0.0625, 0.25 - (row+1) * 0.0625, 0.252},
+					new double[] {-0.25 + col * 0.0625, 0.25 - (row+1) * 0.0625, 0.252},
+					eye ? 0xFFFFFF : color, 1);
+			}
+		}
+		for (int eye = -1; eye <= 1; eye += 2) {
+			m.push(eye * 0.125, 0.03125, 0.26);
+			m.box(0.080, 0.045, 0.014, 0xBBD8FF, Material.GLOW, 0.16);
+			m.pop();
+		}
+		m.pop();
+		m.pop();
+		if (!f.ghost()) {
+			double disruption = 1 - ease(f.age() / 1.5);
+			for (int i = 0; i < 10; i++) {
+				double angle = i * 2.399;
+				m.push(Math.cos(angle) * (0.35 + disruption * 0.4), 0.15 + i * 0.18, Math.sin(angle) * (0.35 + disruption * 0.4));
+				m.rotate(disruption * 1.2, angle, disruption * -0.8);
+				m.box(0.015, 0.16, 0.04, 0x182330, Material.VEIL, disruption * 0.6);
+				m.box(0.007, 0.07, 0.025, 0xDCEAFF, Material.GLOW, disruption * 0.4);
+				m.pop();
+			}
+			double seal = Math.max(0, 1 - Math.abs(f.age() - f.contactTick()) / 1.6);
+			m.push(f.targetX(), f.targetY() - 0.51, f.targetZ());
+			m.rectangle(0.515, 0.515, 0.016, 0xE9F4FF, seal * 0.50);
+			m.push(0, 1.02, 0);
+			m.rectangle(0.515, 0.515, 0.016, 0xE9F4FF, seal * 0.50);
+			m.pop();
+			for (int x = -1; x <= 1; x += 2) {
+				for (int z = -1; z <= 1; z += 2) m.tube(x * 0.515, 0, z * 0.515, x * 0.515, 1.02, z * 0.515,
+					0.016, 0xE9F4FF, Material.GLOW, seal * 0.50);
+			}
+			m.pop();
+		}
+	}
+
+	private static void builderCharge(Mesh m, GrandBuilderClientEffects.Frame f) {
+		double t = f.phaseProgress();
+		double roof = f.height() + 3;
+		if (!f.revealing()) {
+			double flight = ease(t / 0.78);
+			double x = -42 * (1 - flight), z = 26 * (1 - flight);
+			double y = roof + 32 * (1 - flight) + Math.sin(flight * Math.PI) * 14;
+			for (int i = 0; i < 12; i++) {
+				double a = ease((t - i * 0.013) / 0.78), b = ease((t - (i+1) * 0.013) / 0.78);
+				m.tube(-42*(1-a), roof+32*(1-a)+Math.sin(a*Math.PI)*14, 26*(1-a),
+					-42*(1-b), roof+32*(1-b)+Math.sin(b*Math.PI)*14, 26*(1-b),
+					0.13 - i*0.008, i < 3 ? 0xBDF5FF : 0x6C8A9C, Material.GLOW, (1-i/12.0)*0.4);
+			}
+			m.push(x, y + Math.sin(f.motionAge()*0.22)*flight*0.08, z);
+			m.rotate((1-flight)*0.6, f.motionAge()*0.07, (1-flight)*0.7);
+			m.scale(Math.max(1, Math.min(2.2, Math.sqrt(f.radius()/4))));
+			m.lathe(new double[] {0, 0.38, 0.85, 0.95, 0.95, 0.72, 0},
+				new double[] {-1.45, -1.32, -0.85, -0.6, 0.65, 0.95, 1.02}, 32, 0x687360);
+			for (int band = -1; band <= 1; band += 2) {
+				m.push(0, band*0.55, 0);
+				m.lathe(new double[] {0.95, 0.985, 0.985, 0.95}, new double[] {-0.10, -0.08, 0.08, 0.10}, 32, 0xD9BF52);
+				m.pop();
+			}
+			for (int fin = 0; fin < 4; fin++) {
+				m.push(0, 0, 0);
+				m.rotate(0, fin*Math.PI/2, 0);
+				m.push(0, 0.88, 1.04);
+				m.box(0.055, 0.46, 0.42, 0x38464B, Material.SOLID, 1);
+				m.push(0, 0.35, 0.24);
+				m.box(0.06, 0.045, 0.15, 0xD9BF52, Material.SOLID, 1);
+				m.pop();
+				m.pop();
+				m.push(0, 0.15, 0.958);
+				m.box(0.32, 0.25, 0.05, 0x263137, Material.SOLID, 1);
+				m.push(0, 0, 0.055);
+				m.box(0.20, 0.04, 0.006, 0xFF4940, Material.GLOW, 0.35 + Math.pow(Math.sin(f.motionAge()*0.6), 8)*0.60);
+				m.pop();
+				m.pop();
+				m.pop();
+			}
+			m.pop();
+			return;
+		}
+		double expansion = 1 - Math.pow(1-t, 3);
+		double radius = (f.radius()+6)*expansion+0.4;
+		m.push(0, roof, 0);
+		m.sphere(radius, 0xC9F4FF, (1-ease(t/0.42))*0.085);
+		m.torus(radius, 0.08*(1-t)+0.01, 0, 0xFFE7A5, (1-t)*0.65);
+		m.rotate(0, 0, Math.PI/2);
+		m.torus(radius*0.87, 0.035, 0, 0xC3F6FF, (1-t)*0.30);
+		m.pop();
+		double ignition = 1 - ease(t/0.34);
+		m.push(0, roof, 0);
+		m.sphere(0.8 + 4.5*ease(t/0.18), 0xFFE4B0, ignition*0.14);
+		m.sphere(0.5 + 2.8*ease(t/0.14), 0xEDFAFF, ignition*0.24);
+		m.pop();
+		for (int ray = 0; ray < 16; ray++) {
+			double a = ray*2.399;
+			double elevation = Math.sin(ray*1.7)*0.62;
+			double length = (f.radius()+3)*ease(t/0.22);
+			for (int segment = 0; segment < 4; segment++) {
+				double r0 = length*(0.45+segment*0.13), r1 = length*(0.58+segment*0.13);
+				m.tube(Math.cos(a)*r0, roof+elevation*r0, Math.sin(a)*r0,
+					Math.cos(a)*r1, roof+elevation*r1, Math.sin(a)*r1, 0.065*(1-segment*0.17),
+					segment < 2 ? 0xFFF2D5 : 0x7CEBFF, Material.GLOW, ignition*(0.65-segment*0.12));
+			}
+		}
+		for (int i = 0; i < 24; i++) {
+			double a = i*2.399, distance = (f.radius()+4)*ease(t);
+			m.push(Math.cos(a)*distance, roof + Math.sin(t*Math.PI)*(4+i%4) - t*t*4, Math.sin(a)*distance);
+			m.rotate(t*(4+i%3)+i, t*5, a+t*3);
+			m.box(0.06, 0.22+i%3*0.07, 0.30, i%3==0 ? 0xC3AD54 : 0x56655D, Material.SOLID, 1-ease((t-0.45)/0.55));
+			m.push(0, 0, 0.305);
+			m.box(0.03, 0.12, 0.012, 0xBAEBFF, Material.GLOW, (1-t)*0.3);
+			m.pop();
+			m.pop();
+		}
+		// The blast leaves a fitted assembly cage, then a single scan resolves the house.
+		double cage = ease(t/0.12)*(1-ease((t-0.45)/0.55));
+		double halfX = f.width()*0.5+0.18, halfZ = f.depth()*0.5+0.18;
+		for (int x = -1; x <= 1; x += 2) {
+			for (int z = -1; z <= 1; z += 2) {
+				m.tube(x*halfX, 0, z*halfZ, x*halfX, f.height()+0.18, z*halfZ, 0.035, ICE, Material.GLOW, cage*0.55);
+				for (double y : new double[] {0.15, f.height()+0.18}) {
+					m.tube(x*halfX, y, z*halfZ, x*(halfX-Math.min(2,halfX)), y, z*halfZ, 0.065, 0xFFE7A5, Material.GLOW, cage*0.75);
+					m.tube(x*halfX, y, z*halfZ, x*halfX, y, z*(halfZ-Math.min(2,halfZ)), 0.065, 0xFFE7A5, Material.GLOW, cage*0.75);
+				}
+			}
+		}
+		m.push(0, f.height()*ease((t-0.06)/0.75)+0.1, 0);
+		m.rectangle(halfX, halfZ, 0.04, ICE, cage*0.55);
+		m.pop();
 	}
 
 	private static void ufo(Mesh m, GrandBuilderClientEffects.Frame f) {
@@ -253,6 +443,7 @@ public final class EffectGeometry {
 		}
 		private void pop() { matrix=matrices.pop(); }
 		private void rotate(double x, double y, double z) { matrix.rotateXYZ((float)x, (float)y, (float)z); }
+		private void scale(double value) { matrix.scale((float)value); }
 		private void vertex(Material material, double x, double y, double z, int rgb, double alpha) {
 			matrix.transformPosition(point.set((float)x, (float)y, (float)z));
 			int a=(int)Math.round(clamp(alpha*opacity)*255.0);
@@ -304,6 +495,18 @@ public final class EffectGeometry {
 						new double[]{Math.cos(a)*radii[ring+1],heights[ring+1],Math.sin(a)*radii[ring+1]},shade(rgb,lighting),1.0);
 				}
 			}
+		}
+		private void sphere(double radius, int rgb, double alpha) {
+			for (int ring = 0; ring < 12; ring++) {
+				double a = -Math.PI/2 + ring*Math.PI/12, b = -Math.PI/2 + (ring+1)*Math.PI/12;
+				for (int i = 0; i < 32; i++) {
+					double u = i*TAU/32, v = (i+1)*TAU/32;
+					quad(Material.GLOW, spherePoint(radius,a,u), spherePoint(radius,a,v), spherePoint(radius,b,v), spherePoint(radius,b,u), rgb, alpha);
+				}
+			}
+		}
+		private double[] spherePoint(double radius, double latitude, double longitude) {
+			return new double[] {radius*Math.cos(latitude)*Math.cos(longitude), radius*Math.sin(latitude), radius*Math.cos(latitude)*Math.sin(longitude)};
 		}
 		private void tube(double ax,double ay,double az,double bx,double by,double bz,double r,int rgb,Material mat,double alpha) {
 			Vector3f direction=new Vector3f((float)(bx-ax),(float)(by-ay),(float)(bz-az));

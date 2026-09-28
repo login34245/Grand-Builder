@@ -3,6 +3,7 @@ package dev.grandbuilder.build;
 import dev.grandbuilder.GrandBuilderMod;
 import dev.grandbuilder.config.GrandBuilderConfig;
 import dev.grandbuilder.network.BuildEffectPayload;
+import dev.grandbuilder.network.HerobrinePlacementPayload;
 import dev.grandbuilder.network.BuildStatusPayload;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -34,6 +35,7 @@ import net.minecraft.sounds.SoundSource;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Rotation;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
@@ -222,7 +224,7 @@ public final class AnimatedBuildManager {
 				formatDurationTicks(CLOCKWORK_BUILD_DURATION_TICKS)
 			), true);
 		} else {
-			player.displayClientMessage(Component.translatable("message.grand_builder.started", preview.structureName(), speed.displayRate()), true);
+			player.displayClientMessage(Component.translatable("message.grand_builder.started", preview.structureName(), preview.effectMode().displayRate(speed)), true);
 		}
 		player.level().playSound(player, player.blockPosition(), SoundEvents.BEACON_POWER_SELECT, SoundSource.PLAYERS, 1.0f, 0.8f);
 		job.syncScene(player.level(), false);
@@ -489,7 +491,7 @@ public final class AnimatedBuildManager {
 				(int) Math.min(Integer.MAX_VALUE, ticksLeft),
 				job.paused || job.pausedByOffline,
 				speed.networkId(),
-				(float) speed.effectiveBlocksPerTick(),
+				(float) job.effectMode.effectiveRate(speed),
 				terrainEnabled
 			);
 
@@ -524,7 +526,7 @@ public final class AnimatedBuildManager {
 				(int) Math.min(Integer.MAX_VALUE, ticksLeft),
 				false,
 				speed.networkId(),
-				(float) speed.effectiveBlocksPerTick(),
+				(float) preview.effectMode().effectiveRate(speed),
 				terrainEnabled
 			);
 			if (showMessage) {
@@ -541,7 +543,7 @@ public final class AnimatedBuildManager {
 			return;
 		}
 
-		sendStatusPayload(player, 0, "", 0.0f, 0, 0, false, speed.networkId(), (float) speed.effectiveBlocksPerTick(), terrainEnabled);
+		sendStatusPayload(player, 0, "", 0.0f, 0, 0, false, speed.networkId(), (float) getEffectMode(player.getUUID()).effectiveRate(speed), terrainEnabled);
 		if (showMessage) {
 			player.displayClientMessage(Component.translatable("message.grand_builder.no_active_build"), true);
 		}
@@ -577,7 +579,7 @@ public final class AnimatedBuildManager {
 		BuildSpeed next = speed == null ? BuildSpeed.NORMAL : speed;
 		SPEED_BY_PLAYER.put(player.getUUID(), next);
 		if (showMessage) {
-			player.displayClientMessage(Component.translatable("message.grand_builder.speed_set", Component.translatable(next.translationKey()), next.displayRate()), true);
+			player.displayClientMessage(Component.translatable("message.grand_builder.speed_set", Component.translatable(next.translationKey()), getEffectMode(player.getUUID()).displayRate(next)), true);
 		}
 		sendBuildStatus(player, false);
 	}
@@ -710,7 +712,7 @@ public final class AnimatedBuildManager {
 			if (finished) {
 				job.finishEffects(level);
 				job.restoreClockworkTime(level);
-				job.sendScene(level, BuildEffectPayload.PHASE_REVEAL, 28, 0, revealShakeIntensity(job.effectMode));
+				job.sendScene(level, BuildEffectPayload.PHASE_REVEAL, job.effectMode == BuildEffectMode.BUILDER_CHARGE ? 44 : 28, 0, revealShakeIntensity(job.effectMode));
 				if (owner != null) {
 					owner.displayClientMessage(Component.translatable("message.grand_builder.completed", job.structureName), true);
 					if (job.skippedBlocks > 0) {
@@ -1550,6 +1552,9 @@ public final class AnimatedBuildManager {
 		if (effectMode == BuildEffectMode.CLOCKWORK_GRID) {
 			return CLOCKWORK_BUILD_DURATION_TICKS;
 		}
+		if (effectMode == BuildEffectMode.HEROBRINE) {
+			return (long) remainingBlocks * HerobrineTiming.cycleTicks(speed.effectiveBlocksPerTick());
+		}
 		return estimateTicks(remainingBlocks, speed);
 	}
 
@@ -1595,6 +1600,8 @@ public final class AnimatedBuildManager {
 
 	private static float revealShakeIntensity(BuildEffectMode effectMode) {
 		return switch (effectMode) {
+			case HEROBRINE -> 0.0f;
+			case BUILDER_CHARGE -> 2.05f;
 			case METEOR_FORGE -> 2.05f;
 			case RIFT_BLOOM -> 1.70f;
 			default -> 1.85f;
@@ -2049,6 +2056,9 @@ public final class AnimatedBuildManager {
 		private long clockworkWarpSessionTicks;
 		private boolean waitingForChunks;
 		private final UUID sceneId = UUID.randomUUID();
+		private HerobrinePlacementPayload herobrinePlacement;
+		private int herobrineAge;
+		private boolean herobrinePlaced;
 
 		private BuildJob(
 			ResourceKey<Level> dimensionKey,
@@ -2084,10 +2094,11 @@ public final class AnimatedBuildManager {
 		private void syncScene(ServerLevel level, boolean isPaused) {
 			int duration = effectMode.instantReveal() ? effectMode.revealDelayTicks()
 				: effectMode == BuildEffectMode.CLOCKWORK_GRID ? CLOCKWORK_BUILD_DURATION_TICKS
-				: (int) Math.min(Integer.MAX_VALUE, estimateTicks(totalBlocks, getSpeed(ownerId)));
+				: (int) Math.min(Integer.MAX_VALUE, estimateTicks(totalBlocks, getSpeed(ownerId), effectMode));
 			int phase = isPaused ? BuildEffectPayload.PHASE_PAUSED
 				: effectMode.instantReveal() ? BuildEffectPayload.PHASE_ARRIVAL : BuildEffectPayload.PHASE_BUILD;
 			sendScene(level, phase, duration, effectTick, arrivalShakeIntensity(effectMode));
+			if (herobrinePlacement != null) sendHerobrine(level);
 		}
 
 		private void sendScene(ServerLevel level, int phase, int duration, int age, float power) {
@@ -2120,6 +2131,9 @@ public final class AnimatedBuildManager {
 			if (effectMode == BuildEffectMode.CLOCKWORK_GRID) {
 				return tickClockworkBuild(level, config);
 			}
+			if (effectMode == BuildEffectMode.HEROBRINE) {
+				return tickHerobrine(level, speed, config);
+			}
 			tickBuildEffect(level);
 			tickDelayCounter++;
 			if (tickDelayCounter < Math.max(1, speed.tickDelay())) {
@@ -2131,6 +2145,92 @@ public final class AnimatedBuildManager {
 			int attemptsBudget = Math.min(config.maxBlocksPerTick, Math.max(1, speed.blocksPerCycle()));
 			placeBudgetedBlocks(level, attemptsBudget, config);
 			return dryCursor >= dryBlocks.size() && fluidCursor >= fluidBlocks.size();
+		}
+
+		private boolean tickHerobrine(ServerLevel level, BuildSpeed speed, GrandBuilderConfig config) {
+			tickBuildEffect(level);
+			waitingForChunks = false;
+			if (herobrinePlacement == null) {
+				// Air/terrain cleanup and rejected targets do not produce fake placement gestures.
+				for (int attempt = 0; attempt < config.maxBlocksPerTick && remainingBlocks() > 0; attempt++) {
+					GrandPalaceBlueprint.RelativeBlock block = blockAt(placedBlocks());
+					PlacementResult check = checkPlacement(level, block, config);
+					if (check == PlacementResult.WAITING_FOR_CHUNK) {
+						waitingForChunks = true;
+						return false;
+					}
+					BlockPos target = transform(origin, facing, block);
+					BlockState state = rotateState(block.state(), facing);
+					boolean alreadyPresent = !state.hasBlockEntity() && level.getBlockState(target).equals(state);
+					if (check == PlacementResult.SKIPPED || state.isAir() || alreadyPresent) {
+						advanceHerobrine(check == PlacementResult.SKIPPED ? check : placeBlock(level, block, placedBlocks() + 1, config));
+						continue;
+					}
+					Direction side = facing;
+					int elevation = 0;
+					findSpace:
+					for (int stepUp = 0; stepUp <= 1; stepUp++) {
+						for (Direction candidate : new Direction[] {facing, facing.getClockWise(), facing.getCounterClockWise(), facing.getOpposite()}) {
+							BlockPos feet = target.relative(candidate).above(stepUp);
+							if (level.isLoaded(feet) && level.getBlockState(feet).isAir() && level.getBlockState(feet.above()).isAir()) {
+								side = candidate;
+								elevation = stepUp;
+								break findSpace;
+							}
+						}
+					}
+					herobrineAge = 0;
+					herobrinePlaced = false;
+					herobrinePlacement = new HerobrinePlacementPayload(sceneId, dimensionKey.identifier(), placedBlocks(), target,
+						target.getX() + 0.5 + side.getStepX() * 1.15, target.getY() + elevation,
+						target.getZ() + 0.5 + side.getStepZ() * 1.15, Block.getId(rotateState(block.state(), facing)),
+						HerobrineTiming.cycleTicks(speed.effectiveBlocksPerTick()), 0);
+					sendHerobrine(level);
+					break;
+				}
+				if (herobrinePlacement == null) return remainingBlocks() <= 0;
+			}
+			herobrineAge++;
+			if (!herobrinePlaced && herobrineAge >= HerobrineTiming.contactTick(herobrinePlacement.duration())) {
+				GrandPalaceBlueprint.RelativeBlock block = blockAt(placedBlocks());
+				PlacementResult result = placeBlock(level, block, placedBlocks() + 1, config);
+				if (result == PlacementResult.WAITING_FOR_CHUNK) {
+					herobrineAge--;
+					waitingForChunks = true;
+					return false;
+				}
+				advanceHerobrine(result);
+				herobrinePlaced = true;
+				if (result == PlacementResult.PLACED) {
+					level.playSound(null, herobrinePlacement.target(), block.state().getSoundType().getPlaceSound(), SoundSource.BLOCKS, 0.45f, 0.82f);
+					if ((herobrinePlacement.sequence() % 16) == 0) {
+						level.playSound(null, herobrinePlacement.target(), SoundEvents.ENDERMAN_TELEPORT, SoundSource.BLOCKS, 0.18f, 0.65f);
+					}
+				}
+			}
+			if (herobrineAge >= herobrinePlacement.duration()) {
+				herobrinePlacement = null;
+				return remainingBlocks() <= 0;
+			}
+			return false;
+		}
+
+		private void advanceHerobrine(PlacementResult result) {
+			if (dryCursor < dryBlocks.size()) dryCursor++;
+			else fluidCursor++;
+			if (result == PlacementResult.SKIPPED) skippedBlocks++;
+		}
+
+		private void sendHerobrine(ServerLevel level) {
+			HerobrinePlacementPayload p = herobrinePlacement;
+			HerobrinePlacementPayload payload = new HerobrinePlacementPayload(p.sceneId(), p.dimension(), p.sequence(), p.target(),
+				p.x(), p.y(), p.z(), p.blockStateId(), p.duration(), herobrineAge);
+			for (ServerPlayer viewer : level.players()) {
+				if (viewer.distanceToSqr(p.x(), p.y(), p.z()) <= 256.0 * 256.0
+					&& ServerPlayNetworking.canSend(viewer, HerobrinePlacementPayload.TYPE)) {
+					ServerPlayNetworking.send(viewer, payload);
+				}
+			}
 		}
 
 		private boolean tickClockworkBuild(ServerLevel level, GrandBuilderConfig config) {
@@ -2316,6 +2416,12 @@ public final class AnimatedBuildManager {
 						level.playSound(null, center, SoundEvents.AMETHYST_BLOCK_CHIME, SoundSource.BLOCKS, 0.32f, 1.65f);
 					}
 				}
+				case BUILDER_CHARGE -> {
+					if (effectTick >= 52 && effectTick % 5 == 0) {
+						level.playSound(null, center, SoundEvents.NOTE_BLOCK_HAT.value(), SoundSource.BLOCKS, 0.5f, 1.8f);
+					}
+					if (effectTick == 1) level.playSound(null, center, SoundEvents.FIREWORK_ROCKET_LAUNCH, SoundSource.BLOCKS, 0.85f, 0.65f);
+				}
 				default -> { }
 			}
 		}
@@ -2331,6 +2437,10 @@ public final class AnimatedBuildManager {
 		private void spawnInstantRevealBurst(ServerLevel level) {
 			BlockPos center = effectCenter(level);
 			switch (effectMode) {
+				case BUILDER_CHARGE -> {
+					level.playSound(null, center, SoundEvents.GENERIC_EXPLODE.value(), SoundSource.BLOCKS, 1.3f, 0.55f);
+					level.playSound(null, center, SoundEvents.IRON_GOLEM_REPAIR, SoundSource.BLOCKS, 1.0f, 0.75f);
+				}
 				case RIFT_BLOOM -> {
 					level.playSound(null, center, SoundEvents.END_PORTAL_SPAWN, SoundSource.BLOCKS, 1.05f, 0.82f);
 					level.playSound(null, center, SoundEvents.ILLUSIONER_CAST_SPELL, SoundSource.BLOCKS, 1.0f, 0.55f);
@@ -2365,6 +2475,23 @@ public final class AnimatedBuildManager {
 		}
 
 		private PlacementResult placeBlock(ServerLevel level, GrandPalaceBlueprint.RelativeBlock block, int progressIndex, GrandBuilderConfig config) {
+			PlacementResult check = checkPlacement(level, block, config);
+			if (check != PlacementResult.READY) return check;
+			BlockPos targetPos = transform(origin, facing, block);
+			BlockState rotatedState = rotateState(block.state(), facing);
+			level.setBlock(targetPos, rotatedState, 2);
+			applyBlockEntityData(level, targetPos, rotatedState, block.blockEntityNbt());
+
+			if (effectMode == BuildEffectMode.STANDARD && (progressIndex & 7) == 0) {
+				level.sendParticles(ParticleTypes.END_ROD, targetPos.getX() + 0.5, targetPos.getY() + 0.5, targetPos.getZ() + 0.5, 1, 0.25, 0.25, 0.25, 0.01);
+			}
+			if (effectMode == BuildEffectMode.STANDARD && (progressIndex % 24) == 0) {
+				level.playSound(null, targetPos, SoundEvents.AMETHYST_BLOCK_CHIME, SoundSource.BLOCKS, 0.25f, 1.20f);
+			}
+			return PlacementResult.PLACED;
+		}
+
+		private PlacementResult checkPlacement(ServerLevel level, GrandPalaceBlueprint.RelativeBlock block, GrandBuilderConfig config) {
 			BlockPos targetPos = transform(origin, facing, block);
 			if (!level.isInWorldBounds(targetPos)) {
 				return PlacementResult.SKIPPED;
@@ -2384,17 +2511,7 @@ public final class AnimatedBuildManager {
 				return PlacementResult.SKIPPED;
 			}
 
-			level.setBlock(targetPos, rotatedState, 2);
-			applyBlockEntityData(level, targetPos, rotatedState, block.blockEntityNbt());
-
-			if (effectMode == BuildEffectMode.STANDARD && (progressIndex & 7) == 0) {
-				level.sendParticles(ParticleTypes.END_ROD, targetPos.getX() + 0.5, targetPos.getY() + 0.5, targetPos.getZ() + 0.5, 1, 0.25, 0.25, 0.25, 0.01);
-			}
-			if (effectMode == BuildEffectMode.STANDARD && (progressIndex % 24) == 0) {
-				level.playSound(null, targetPos, SoundEvents.AMETHYST_BLOCK_CHIME, SoundSource.BLOCKS, 0.25f, 1.20f);
-			}
-
-			return PlacementResult.PLACED;
+			return PlacementResult.READY;
 		}
 
 
@@ -2420,7 +2537,12 @@ public final class AnimatedBuildManager {
 				}
 				return Math.max(1L, CLOCKWORK_BUILD_DURATION_TICKS - clockworkElapsedTicks);
 			}
-			return estimateTicks(remainingBlocks(), speed);
+			if (effectMode == BuildEffectMode.HEROBRINE && herobrinePlacement != null) {
+				int pending = remainingBlocks() - (herobrinePlaced ? 0 : 1);
+				return Math.max(0, herobrinePlacement.duration() - herobrineAge)
+					+ estimateTicks(pending, speed, effectMode);
+			}
+			return estimateTicks(remainingBlocks(), speed, effectMode);
 		}
 
 		private double progressPercent() {
@@ -2436,6 +2558,7 @@ public final class AnimatedBuildManager {
 	}
 
 	private enum PlacementResult {
+		READY,
 		PLACED,
 		SKIPPED,
 		WAITING_FOR_CHUNK

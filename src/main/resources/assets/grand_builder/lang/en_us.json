@@ -20,6 +20,8 @@
   "effect.grand_builder.meteor_forge": "Meteor Forge",
   "effect.grand_builder.clockwork_grid": "Clockwork Drive",
   "effect.grand_builder.aurora_weave": "Aurora Weave",
+  "effect.grand_builder.herobrine": "Herobrine",
+  "effect.grand_builder.builder_charge": "Builder Charge",
   "subtitles.grand_builder.clock_tick": "Clockwork ticking",
   "screen.grand_builder.title": "Builder Console",
   "screen.grand_builder.subtitle": "Preview, confirm, build, save custom structures.",

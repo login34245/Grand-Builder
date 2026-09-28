@@ -352,7 +352,7 @@ public class BuilderMenuScreen extends Screen {
 		return Component.translatable(
 			"screen.grand_builder.speed_value",
 			Component.translatable(selectedSpeed.translationKey()),
-			selectedSpeed.displayRate()
+			selectedEffectMode.displayRate(selectedSpeed)
 		);
 	}
 
@@ -687,7 +687,7 @@ public class BuilderMenuScreen extends Screen {
 		BuildSpeed speed = BuildSpeed.byNetworkId(snapshot.speedId());
 		String speedRateText = snapshot.speedBlocksPerTick() > 0.0f
 			? String.format(Locale.US, "%.2f", snapshot.speedBlocksPerTick())
-			: speed.displayRate();
+			: selectedEffectMode.displayRate(speed);
 
 		Component modeText = switch (snapshot.modeId()) {
 			case 1 -> snapshot.paused()

@@ -25,6 +25,7 @@ import net.minecraft.world.phys.Vec3;
 
 public final class GrandBuilderWorldEffects {
 	private static final RenderStateDataKey<List<GrandBuilderClientEffects.Frame>> SCENES = RenderStateDataKey.create();
+	private static final RenderStateDataKey<List<GrandBuilderClientEffects.ActorFrame>> ACTORS = RenderStateDataKey.create();
 	private static final RenderType SOLID = layer("effect_solid", false, true);
 	private static final RenderType VEIL = layer("effect_veil", false, false);
 	private static final RenderType GLOW = layer("effect_glow", true, false);
@@ -67,26 +68,37 @@ public final class GrandBuilderWorldEffects {
 	}
 
 	private static void extract(WorldExtractionContext context) {
-		context.worldState().setData(SCENES, GrandBuilderClientEffects.extract(
-			context.tickCounter().getGameTimeDeltaPartialTick(false)));
+		float partialTick = context.tickCounter().getGameTimeDeltaPartialTick(false);
+		context.worldState().setData(SCENES, GrandBuilderClientEffects.extract(partialTick));
+		context.worldState().setData(ACTORS, GrandBuilderClientEffects.extractActors(partialTick));
 	}
 
 	private static void draw(WorldRenderContext context) {
 		List<GrandBuilderClientEffects.Frame> frames = context.worldState().getData(SCENES);
-		if (frames == null || frames.isEmpty()) return;
+		List<GrandBuilderClientEffects.ActorFrame> actors = context.worldState().getData(ACTORS);
+		if (frames == null || actors == null || (frames.isEmpty() && actors.isEmpty())) return;
 		Vec3 camera = context.worldState().cameraRenderState.pos;
 		VertexConsumer solid = buffers.getBuffer(SOLID);
 		VertexConsumer veil = buffers.getBuffer(VEIL);
 		VertexConsumer glow = buffers.getBuffer(GLOW);
 		PoseStack matrices = context.matrices();
+		EffectGeometry.Sink sink = (material, x, y, z, color) -> {
+			VertexConsumer target = switch (material) { case SOLID -> solid; case VEIL -> veil; case GLOW -> glow; };
+			target.addVertex(matrices.last().pose(), x, y, z).setColor(color);
+		};
 		for (GrandBuilderClientEffects.Frame frame : frames) {
+			if (frame.opacity() <= 0) continue;
 			if (camera.distanceToSqr(frame.x(), frame.y() + frame.height()*0.5, frame.z()) > 256.0*256.0) continue;
 			matrices.pushPose();
 			matrices.translate(frame.x()-camera.x, frame.y()-camera.y, frame.z()-camera.z);
-			EffectGeometry.emit(frame, (material, x, y, z, color) -> {
-				VertexConsumer target = switch (material) { case SOLID -> solid; case VEIL -> veil; case GLOW -> glow; };
-				target.addVertex(matrices.last().pose(), x, y, z).setColor(color);
-			});
+			EffectGeometry.emit(frame, sink);
+			matrices.popPose();
+		}
+		for (GrandBuilderClientEffects.ActorFrame actor : actors) {
+			if (actor.opacity() <= 0 || camera.distanceToSqr(actor.x(), actor.y() + 1, actor.z()) > 256.0 * 256.0) continue;
+			matrices.pushPose();
+			matrices.translate(actor.x() - camera.x, actor.y() - camera.y, actor.z() - camera.z);
+			EffectGeometry.emitHerobrine(actor, sink);
 			matrices.popPose();
 		}
 		buffers.endBatch(SOLID);

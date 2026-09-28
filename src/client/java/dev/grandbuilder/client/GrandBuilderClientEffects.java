@@ -1,7 +1,9 @@
 package dev.grandbuilder.client;
 
 import dev.grandbuilder.build.BuildEffectMode;
+import dev.grandbuilder.build.HerobrineTiming;
 import dev.grandbuilder.network.BuildEffectPayload;
+import dev.grandbuilder.network.HerobrinePlacementPayload;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -12,6 +14,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.level.block.Block;
 
 public final class GrandBuilderClientEffects {
 	private static final Map<UUID, Scene> SCENES = new LinkedHashMap<>();
@@ -45,6 +48,8 @@ public final class GrandBuilderClientEffects {
 		private float progress;
 		private float previousProgress;
 		private int staleTicks;
+		private Actor actor;
+		private final List<Actor> ghosts = new ArrayList<>();
 
 		private Scene(BuildEffectPayload payload) {
 			this.payload = payload;
@@ -55,6 +60,44 @@ public final class GrandBuilderClientEffects {
 			this.progress = clamp(payload.progress());
 			this.previousProgress = progress;
 		}
+	}
+
+	public record ActorFrame(double x, double y, double z, double targetX, double targetY, double targetZ,
+		float age, int duration, int contactTick, int blockColor, float opacity, boolean ghost) {
+	}
+
+	private static final class Actor {
+		private HerobrinePlacementPayload payload;
+		private float age;
+		private float previousAge;
+		private int ghostAge;
+		private final int blockColor;
+
+		private Actor(HerobrinePlacementPayload payload, int blockColor) {
+			this.payload = payload;
+			this.age = Math.max(0, payload.age());
+			this.previousAge = age;
+			this.blockColor = blockColor;
+		}
+	}
+
+	public static void place(HerobrinePlacementPayload payload) {
+		Minecraft client = Minecraft.getInstance();
+		if (client.level == null || !client.level.dimension().identifier().equals(payload.dimension())) return;
+		Scene scene = SCENES.get(payload.sceneId());
+		if (scene == null || BuildEffectMode.byNetworkId(scene.payload.effectModeId()) != BuildEffectMode.HEROBRINE) return;
+		if (scene.actor != null && scene.actor.payload.sequence() == payload.sequence()) {
+			scene.actor.payload = payload;
+			scene.actor.age = Math.max(0, payload.age());
+			scene.actor.previousAge = scene.actor.age;
+			return;
+		}
+		if (scene.actor != null) {
+			if (scene.ghosts.size() >= 2) scene.ghosts.removeFirst();
+			scene.ghosts.add(scene.actor);
+		}
+		int color = Block.stateById(payload.blockStateId()).getMapColor(client.level, payload.target()).col;
+		scene.actor = new Actor(payload, color == 0 ? 0xA3ADB5 : color);
 	}
 
 	public static void trigger(BuildEffectPayload payload) {
@@ -90,7 +133,7 @@ public final class GrandBuilderClientEffects {
 				impactPower = power;
 				impactAge = 0.0f;
 				impactColor = switch (BuildEffectMode.byNetworkId(payload.effectModeId())) {
-					case METEOR_FORGE, CLOCKWORK_GRID -> 0xFFE1A3;
+					case METEOR_FORGE, CLOCKWORK_GRID, BUILDER_CHARGE -> 0xFFE1A3;
 					case RIFT_BLOOM -> 0xEBD2FF;
 					default -> 0xD8FFFF;
 				};
@@ -118,6 +161,11 @@ public final class GrandBuilderClientEffects {
 				if (phase == BuildEffectPayload.PHASE_ARRIVAL) {
 					scene.age = Math.min(scene.age, scene.payload.durationTicks());
 				}
+				if (scene.actor != null) {
+					scene.actor.previousAge = scene.actor.age;
+					scene.actor.age = Math.min(scene.actor.age + 1, scene.actor.payload.duration());
+				}
+				scene.ghosts.removeIf(actor -> ++actor.ghostAge >= 6);
 			}
 			scene.progress += (clamp(scene.payload.progress()) - scene.progress) * 0.35f;
 			scene.staleTicks++;
@@ -148,6 +196,31 @@ public final class GrandBuilderClientEffects {
 				p.max().getZ() - p.min().getZ() + 1.0));
 		}
 		return List.copyOf(frames);
+	}
+
+	public static List<ActorFrame> extractActors(float partialTick) {
+		List<ActorFrame> frames = new ArrayList<>();
+		for (Scene scene : SCENES.values()) {
+			int phase = scene.payload.phaseId();
+			boolean paused = phase == BuildEffectPayload.PHASE_PAUSED;
+			float age = lerp(scene.previousAge, scene.age, partialTick);
+			float opacity = paused ? 0.35f : 1.0f;
+			if (phase == BuildEffectPayload.PHASE_REVEAL || phase == BuildEffectPayload.PHASE_STOP) opacity *= clamp(1 - age / 5);
+			if (scene.actor != null) frames.add(actorFrame(scene.actor, paused ? 1 : partialTick, opacity, false));
+			for (Actor ghost : scene.ghosts) {
+				frames.add(actorFrame(ghost, 1, opacity * 0.18f * clamp(1 - (ghost.ghostAge + (paused ? 0 : partialTick)) / 6), true));
+			}
+		}
+		return List.copyOf(frames);
+	}
+
+	private static ActorFrame actorFrame(Actor actor, float partialTick, float opacity, boolean ghost) {
+		HerobrinePlacementPayload p = actor.payload;
+		int duration = Math.max(2, Math.min(24, p.duration()));
+		return new ActorFrame(p.x(), p.y(), p.z(), p.target().getX() + 0.5 - p.x(),
+			p.target().getY() + 0.5 - p.y(), p.target().getZ() + 0.5 - p.z(),
+			lerp(actor.previousAge, actor.age, partialTick), duration, HerobrineTiming.contactTick(duration),
+			actor.blockColor, opacity, ghost);
 	}
 
 	public static float shake(float partialTick) {
