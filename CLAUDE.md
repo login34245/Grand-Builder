@@ -91,6 +91,8 @@ Copy-Item -LiteralPath $jar -Destination (Join-Path $modsDir 'grand_builder-1.1.
 
 ## Publishing
 
+- September 2026 delivery: the new 3D-effects jar was built, copied to both requested local folders, and source changes were pushed to `main`. The GitHub `v1.1.0` release asset was not replaced because release-publishing access was unavailable; do not assume that asset matches the current sources.
+
 - If committing, keep commits focused and do not revert unrelated user changes.
 - The user has been using tag/release `v1.1.0`; previous updates force-moved this tag and replaced the release asset.
 - When updating the release body, mention user-facing changes clearly in Russian.
