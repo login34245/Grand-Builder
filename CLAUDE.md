@@ -21,6 +21,8 @@ This file is a handoff for future AI agents working on this repository, includin
 - For experimental effects, do not make every mode look like the UFO example. Each mode should have its own idea, staging, sound, and visual language.
 - Strong preference for real 3D geometry in world space, cinematic timing, light, depth, and restrained camera accents. Particle silhouettes and flat HUD stripes are not a substitute.
 - Avoid relying only on vanilla-looking effects when the user asks for experimental mode visuals.
+- The user explicitly named `https://www.youtube.com/@notrofls/shorts` as a creative direction for future updates. Treat it as a reference, not a request to copy the creator's assets or exact scenes. Two examples inspected through browser keyframes: `https://www.youtube.com/shorts/ZJlrCHMb4ko` (an ordinary Minecraft scene cuts to an isolated door on black, then returns to gameplay) and `https://www.youtube.com/shorts/4dAI5rdp2FI` (an antimatter premise with players and an extreme corrupted-looking finale). These were visual/keyframe checks, not a full audio or frame-by-frame analysis.
+- For this direction, prioritize legible physical block/object transformations, distinctive staging, close-up-worthy details, and clear anticipation/contact/recovery timing over extra particle noise. The mod should supply the 3D action; Flashback and the user's editing/music supply the final video rhythm. Verify effect recording/playback in Flashback before claiming suitability for that workflow. This reference does not authorize changing the existing speed budgets or automatically implementing new modes.
 
 ## Interface Requirements
 
