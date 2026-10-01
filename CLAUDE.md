@@ -66,6 +66,8 @@ This file is a handoff for future AI agents working on this repository, includin
 
 ## Editable Preview Controls
 
+- The user withdrew the request to change vertical movement after learning that Page Up/Page Down already exist. Do not change those bindings or add the proposed Shift+arrow aliases as part of the block-replacement update.
+
 - Hold the Builder Core and create a preview. Default bindings: `R` rotates clockwise by 90 degrees; arrow keys move by one block relative to the player's horizontal viewing direction; `Page Up` / `Page Down` raise/lower it. All seven bindings are registered with Minecraft's normal Controls menu in the Grand Builder category.
 - Rotation uses a persistent integer grid pivot. Four rotations return to the exact original origin; translating moves the pivot too. Confirmation builds at the edited origin/orientation, not the original selection.
 - Movement repeats after eight held ticks, then every four ticks. Rotation is one action per press. Controls are inactive while a chat/menu is open or no preview is pending; queued inactive clicks are discarded.
@@ -83,6 +85,14 @@ This file is a handoff for future AI agents working on this repository, includin
 - Four original synthesized sound accents live under `sounds/effects/`: `block_flight.ogg`, `rubble_pull.ogg`, `assembly_servo.ogg`, and `model_unfold.ogg`. No externally downloaded audio or extra asset license is required.
 - Latest isolated integrated-game QA passes all 48 new mode/speed combinations, exact cursor/ETA checks, pause/setup freezing, protected chest and air cleanup, custom caps, live speed changes, and unloaded-chunk waits. Preview checks cover reversible rotation/translation, world-height rejection, edited placement, and actual client/server key rebinding. All four textured 3D scenes were rendered and captured in Minecraft 1.21.11. Local harness: `build/qa-src/dev/grandbuilder/qa/QaKinetic.java`; successful log: `build/qa-kinetic-final5.log`. Neither ships in the jar.
 - The user's main workflow is recording construction with Flashback and editing it into YouTube Shorts. Flashback playback, Iris shader packs, and remote multiplayer have NOT been tested for these new render-only scenes; do not promise compatibility without a dedicated recording/playback test.
+
+## Existing Blocks at the Build Site (October 2026)
+
+- Latest request: choose in the console whether construction replaces existing blocks or leaves them intact. BuildOptions/BuildRequestPayload now carry replaceExistingBlocks; the estimate request embeds the same payload. Upgrade client and server jars together. A native binary CycleButton has its own responsive row and remembers the choice across menu reopening/mode changes. Prepared previews/jobs retain their original choice; changing the console affects a newly prepared preview, not an active job.
+- KEEP is the safe default. The shared canReplace guard rejects every occupied position before state equality, including replaceable plants, liquids, identical block entities, blueprint-air cleanup and terrain operations. REPLACE explicitly uses ALL for this job, including containers and blueprint-air cleanup; this per-build choice supersedes legacy config.replaceRule. Existing permissions, dimension, radius, world-height and chunk guards remain.
+- Destructive Builder Charge is normalized off when keeping blocks, on both the client and server, and its toggle is disabled with a localized explanation. Switching to KEEP clears a previously selected dangerous explosion. The independent blast confirmation remains when replacement/destructive mode is explicitly chosen.
+- Rollback pre-capture excludes cells rejected by this policy and includes equal-state block entities so their overwritten NBT can be restored. Dismantle still removes/restores only positions changed by its own preparation. Construction cadences, experimental visuals and vertical movement controls are unchanged.
+- The user explicitly asked not to launch Minecraft for this update and will verify gameplay personally. Run the build and headless verifyEffectGeometry only; do not claim integrated gameplay/UI verification for this change. Focused checks cover all modes, safe destructive normalization, both C2S codecs, and actual server policy against air, solid blocks, plants, fluids and containers under every legacy config rule.
 
 ## Clockwork Drive / Заводной ход
 
@@ -136,7 +146,8 @@ Copy-Item -LiteralPath $jar -Destination (Join-Path $modsDir 'grand_builder-1.1.
 ## Publishing
 
 - September 2026 delivery: the new 3D-effects jar was built, copied to both requested local folders, and source changes were pushed to `main`. The GitHub `v1.1.0` release asset was not replaced because release-publishing access was unavailable; do not assume that asset matches the current sources.
-- Latest local delivery (2026-10-01) adds Java world-folder/ZIP import, six editable crop edges, saving into the structure library, and textured orbitable inspection for imported and ordinary structures. Existing construction modes, speed budgets and rebindable preview controls remain. Current jar SHA256: `FC8EF7295792C116F6236914C7204822981A83158D9086225C7BADA07AF7FD96`, verified equal in Downloads and the requested C-drive mods directory. The release asset limitation above still applies. Delivery hashes from older revisions are not the current jar.
+- Earlier 2026-10-01 delivery added Java world-folder/ZIP import, six editable crop edges, saving into the structure library, and textured orbitable inspection for imported and ordinary structures. Its jar hash was `FC8EF7295792C116F6236914C7204822981A83158D9086225C7BADA07AF7FD96`; it is no longer the current artifact.
+- Latest local delivery (2026-10-01) adds the per-build keep/replace choice described above. Current jar SHA256: `155AD37DBF1F4EFB846D7B49881EE718F4A3DF5B8ECA333FE5D21D026658A4FE`, verified equal in Downloads and the requested C-drive mods directory. `build verifyEffectGeometry` passed; Minecraft was not launched per the user's request. The release asset limitation above still applies. Delivery hashes from older revisions are not the current jar.
 
 - If committing, keep commits focused and do not revert unrelated user changes.
 - The user has been using tag/release `v1.1.0`; previous updates force-moved this tag and replaced the release asset.

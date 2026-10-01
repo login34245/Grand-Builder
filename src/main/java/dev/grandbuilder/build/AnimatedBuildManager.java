@@ -114,7 +114,7 @@ public final class AnimatedBuildManager {
 		List<GrandPalaceBlueprint.RelativeBlock> blocks = structure.custom() ? CUSTOM_BLUEPRINT_BY_PLAYER.get(player.getUUID()) : structure.blueprint();
 		BuildEffectMode mode = BuildEffectMode.byNetworkId(selected.effectModeId());
 		BuildOptions options = new BuildOptions(BuildStartSide.byId(selected.orderId()),
-			DismantleStyle.byId(selected.dismantleStyleId()), selected.destructiveExplosion()).normalized(mode);
+			DismantleStyle.byId(selected.dismantleStyleId()), selected.destructiveExplosion(), selected.replaceExistingBlocks()).normalized(mode);
 		boolean available = checkCanUse(player, false, false) && blocks != null && !blocks.isEmpty()
 			&& blocks.size() <= GrandBuilderConfig.get().maxBlocksPerBuild;
 		int count = 0;
@@ -1024,7 +1024,7 @@ public final class AnimatedBuildManager {
 		}
 
 		BuildBounds effectBounds = computeBuildBounds(origin, facing, finalBlueprint);
-		RollbackData rollbackData = captureRollbackSnapshot(player.level(), player.level().dimension(), structureName, origin, facing, finalBlueprint);
+		RollbackData rollbackData = captureRollbackSnapshot(player.level(), player.level().dimension(), structureName, origin, facing, finalBlueprint, options);
 		return new BuildJob(player.level().dimension(), origin, facing, player.getUUID(), structureName, finalBlueprint, rollbackData, effectMode, effectBounds, options);
 	}
 
@@ -1522,8 +1522,11 @@ public final class AnimatedBuildManager {
 		BlockPos pos,
 		BlockState existing,
 		BlockState target,
-		GrandBuilderConfig.ReplaceRule replaceRule
+		GrandBuilderConfig.ReplaceRule replaceRule,
+		BuildOptions options
 	) {
+		if (!options.canReplace(existing.isAir())) return false;
+		if (options.replaceExistingBlocks()) replaceRule = GrandBuilderConfig.ReplaceRule.ALL;
 		if (existing.equals(target)) {
 			return true;
 		}
@@ -1602,7 +1605,8 @@ public final class AnimatedBuildManager {
 		Component structureName,
 		BlockPos origin,
 		Direction facing,
-		List<GrandPalaceBlueprint.RelativeBlock> blocks
+		List<GrandPalaceBlueprint.RelativeBlock> blocks,
+		BuildOptions options
 	) {
 		Map<BlockPos, SnapshotBlock> snapshot = new HashMap<>();
 		for (GrandPalaceBlueprint.RelativeBlock block : blocks) {
@@ -1616,7 +1620,8 @@ public final class AnimatedBuildManager {
 			}
 			BlockState state = level.getBlockState(immutablePos);
 			BlockState targetState = rotateState(block.state(), facing);
-			if (state.equals(targetState)) {
+			if (state.equals(targetState) && !state.hasBlockEntity()
+				|| !canReplace(level, targetPos, state, targetState, GrandBuilderConfig.get().replaceRule(), options)) {
 				continue;
 			}
 			snapshot.put(immutablePos, new SnapshotBlock(state, captureBlockEntityData(level, immutablePos)));
@@ -1994,7 +1999,7 @@ public final class AnimatedBuildManager {
 				}
 
 				BlockState existing = level.getBlockState(pos);
-				if (!canReplace(level, pos, existing, targetState, config.replaceRule())) {
+				if (!canReplace(level, pos, existing, targetState, config.replaceRule(), options)) {
 					conflicts.add(sampledIndex);
 				}
 			}
@@ -2884,7 +2889,7 @@ public final class AnimatedBuildManager {
 			}
 
 			BlockState existing = level.getBlockState(targetPos);
-			if (!canReplace(level, targetPos, existing, rotatedState, config.replaceRule())) {
+			if (!canReplace(level, targetPos, existing, rotatedState, config.replaceRule(), options)) {
 				return PlacementResult.SKIPPED;
 			}
 

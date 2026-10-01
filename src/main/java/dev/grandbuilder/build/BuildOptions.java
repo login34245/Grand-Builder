@@ -1,12 +1,17 @@
 package dev.grandbuilder.build;
 
-public record BuildOptions(BuildStartSide startSide, DismantleStyle dismantleStyle, boolean destructiveExplosion) {
-	public static final BuildOptions DEFAULT = new BuildOptions(BuildStartSide.TOP, DismantleStyle.STANDARD, false);
+public record BuildOptions(BuildStartSide startSide, DismantleStyle dismantleStyle, boolean destructiveExplosion,
+	boolean replaceExistingBlocks) {
+	public static final BuildOptions DEFAULT = new BuildOptions(BuildStartSide.TOP, DismantleStyle.STANDARD, false, false);
 
 	public BuildOptions normalized(BuildEffectMode mode) {
 		return new BuildOptions(mode == BuildEffectMode.REVERSE ? startSide : BuildStartSide.TOP,
 			mode == BuildEffectMode.DISMANTLE ? dismantleStyle : DismantleStyle.STANDARD,
-			mode == BuildEffectMode.BUILDER_CHARGE && destructiveExplosion);
+			mode == BuildEffectMode.BUILDER_CHARGE && destructiveExplosion && replaceExistingBlocks, replaceExistingBlocks);
+	}
+
+	public boolean canReplace(boolean existingIsAir) {
+		return replaceExistingBlocks || existingIsAir;
 	}
 
 	public BuildEffectMode visualMode(BuildEffectMode mode) {

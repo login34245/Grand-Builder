@@ -6,12 +6,24 @@ import dev.grandbuilder.build.BuildSpeed;
 import dev.grandbuilder.build.HerobrineTiming;
 import dev.grandbuilder.build.BuildStartSide;
 import dev.grandbuilder.build.BuildOptions;
+import dev.grandbuilder.build.AnimatedBuildManager;
+import dev.grandbuilder.config.GrandBuilderConfig;
 import dev.grandbuilder.build.DismantleStyle;
 import dev.grandbuilder.network.BuildEffectPayload;
 import dev.grandbuilder.network.KineticBuildPayload;
+import dev.grandbuilder.network.BuildRequestPayload;
+import dev.grandbuilder.network.BuildEstimateRequestPayload;
 import dev.grandbuilder.build.PreviewPlacement;
+import io.netty.buffer.Unpooled;
+import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.RegistryAccess;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.server.Bootstrap;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
 import java.util.List;
 import java.util.Arrays;
 import java.util.HashSet;
@@ -51,6 +63,7 @@ public final class EffectGeometryTest {
 		int actors = verifyHerobrine();
 		int bolts = verifyLightning();
 		verifyOptions();
+		verifyReplacementOptions();
 		verifyBuildDirections();
 		verifyCadence();
 		verifyKinetic();
@@ -173,9 +186,9 @@ public final class EffectGeometryTest {
 
 	private static void verifyOptions() {
 		check(BuildStartSide.values().length==5,"Unexpected bottom build option");
-		BuildOptions options=new BuildOptions(BuildStartSide.RIGHT,DismantleStyle.HEROBRINE,true);
+		BuildOptions options=new BuildOptions(BuildStartSide.RIGHT,DismantleStyle.HEROBRINE,true,true);
 		check(!options.normalized(BuildEffectMode.DISMANTLE).destructiveExplosion(),"Destructive dismantle leaked");
-		check(options.normalized(BuildEffectMode.STANDARD).equals(BuildOptions.DEFAULT),"Hidden settings leaked");
+		check(options.normalized(BuildEffectMode.STANDARD).equals(new BuildOptions(BuildStartSide.TOP,DismantleStyle.STANDARD,false,true)),"Hidden settings leaked");
 		check(options.normalized(BuildEffectMode.REVERSE).startSide()==BuildStartSide.RIGHT,"Build side lost");
 		check(options.normalized(BuildEffectMode.BUILDER_CHARGE).destructiveExplosion(),"Explosion option lost");
 		check(options.normalized(BuildEffectMode.DISMANTLE).visualMode(BuildEffectMode.DISMANTLE)==BuildEffectMode.HEROBRINE,"Wrong removal actor");
@@ -183,6 +196,54 @@ public final class EffectGeometryTest {
 		EffectGeometry.emitHerobrine(new GrandBuilderClientEffects.ActorFrame(0,64,0,1.15,0.5,0,0.75f,3,1,0xC9A36A,1,false,true),before::accept);
 		EffectGeometry.emitHerobrine(new GrandBuilderClientEffects.ActorFrame(0,64,0,1.15,0.5,0,1,3,1,0xC9A36A,1,false,true),after::accept);
 		check(after.materialCounts[0]-before.materialCounts[0]==24,"Removed block not taken into hand");
+	}
+
+	private static void verifyReplacementOptions() {
+		SharedConstants.tryDetectVersion();
+		Bootstrap.bootStrap();
+		check(!BuildOptions.DEFAULT.replaceExistingBlocks(), "New builds must preserve existing blocks by default");
+		for (boolean replace : new boolean[] {false, true}) {
+			for (BuildEffectMode mode : BuildEffectMode.values()) {
+				BuildOptions options = new BuildOptions(BuildStartSide.RIGHT, DismantleStyle.HEROBRINE, true, replace).normalized(mode);
+				check(options.replaceExistingBlocks() == replace, "Mode change lost the replacement setting");
+				check(options.canReplace(true), "Empty positions must allow construction");
+				check(options.canReplace(false) == replace, "Keep mode would overwrite an occupied position");
+				check(options.destructiveExplosion() == (replace && mode == BuildEffectMode.BUILDER_CHARGE),
+					"Destructive explosion bypasses block preservation");
+			}
+			BuildRequestPayload request = new BuildRequestPayload("world_test.schem", 3, 7, 2, 1, true, replace);
+			RegistryFriendlyByteBuf buffer = new RegistryFriendlyByteBuf(Unpooled.buffer(), RegistryAccess.EMPTY);
+			try {
+				BuildRequestPayload.CODEC.encode(buffer, request);
+				check(BuildRequestPayload.CODEC.decode(buffer).equals(request) && !buffer.isReadable(), "Build selection codec lost replacement state");
+				buffer.clear();
+				BuildEstimateRequestPayload estimate = new BuildEstimateRequestPayload(42, request);
+				BuildEstimateRequestPayload.CODEC.encode(buffer, estimate);
+				check(BuildEstimateRequestPayload.CODEC.decode(buffer).equals(estimate) && !buffer.isReadable(), "Estimate codec lost replacement state");
+			} finally {
+				buffer.release();
+			}
+		}
+		try {
+			var policy = AnimatedBuildManager.class.getDeclaredMethod("canReplace", ServerLevel.class, BlockPos.class,
+				BlockState.class, BlockState.class, GrandBuilderConfig.ReplaceRule.class, BuildOptions.class);
+			policy.setAccessible(true);
+			for (var rule : GrandBuilderConfig.ReplaceRule.values()) {
+				for (BlockState existing : List.of(Blocks.AIR.defaultBlockState(), Blocks.STONE.defaultBlockState(),
+					Blocks.SHORT_GRASS.defaultBlockState(), Blocks.WATER.defaultBlockState(), Blocks.CHEST.defaultBlockState())) {
+					for (BlockState target : List.of(Blocks.AIR.defaultBlockState(), Blocks.BRICKS.defaultBlockState(), existing)) {
+						for (boolean replace : new boolean[] {false, true}) {
+							BuildOptions options = new BuildOptions(BuildStartSide.TOP, DismantleStyle.STANDARD, false, replace);
+							boolean allowed = (boolean) policy.invoke(null, null, BlockPos.ZERO, existing, target, rule, options);
+							check(allowed == (replace || existing.isAir()), "Placement policy failed for occupied/air/fluid/container cells");
+						}
+					}
+				}
+			}
+		} catch (ReflectiveOperationException exception) {
+			throw new AssertionError("Could not verify server placement policy", exception);
+		}
+		System.out.println("Block preservation/replacement and selection codecs verified for every build mode.");
 	}
 
 	private static Stats actorSample(double[] target, float age, int duration, int contact, float opacity, boolean ghost) {

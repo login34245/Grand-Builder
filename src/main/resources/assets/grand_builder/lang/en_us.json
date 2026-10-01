@@ -211,5 +211,11 @@
   "key.grand_builder.move_preview_right": "Move Preview Right",
   "key.grand_builder.move_preview_up": "Raise Preview",
   "key.grand_builder.move_preview_down": "Lower Preview",
-  "message.grand_builder.preview_move_blocked": "Preview cannot move beyond the world height or allowed build radius."
+  "message.grand_builder.preview_move_blocked": "Preview cannot move beyond the world height or allowed build radius.",
+  "screen.grand_builder.existing_blocks": "Existing blocks",
+  "screen.grand_builder.blocks_keep": "Blocks: Keep existing",
+  "screen.grand_builder.blocks_replace": "Blocks: Replace existing",
+  "screen.grand_builder.blocks_keep_tooltip": "Only empty positions are filled. Existing blocks, fluids and containers stay intact, including during terrain preparation.",
+  "screen.grand_builder.blocks_replace_tooltip": "Existing blocks are replaced, including containers. Air in the schematic clears occupied positions. Terrain preparation can also clear nearby obstacles.",
+  "screen.grand_builder.blocks_keep_explosion": "Explosions are visual-only while existing blocks are preserved."
 }
