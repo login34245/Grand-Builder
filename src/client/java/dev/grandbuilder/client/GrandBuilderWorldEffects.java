@@ -10,6 +10,7 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.blaze3d.vertex.VertexFormat;
 import dev.grandbuilder.GrandBuilderMod;
+import dev.grandbuilder.network.StructurePreviewPayload;
 import dev.grandbuilder.client.mixin.RenderTypeAccess;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -29,6 +30,7 @@ public final class GrandBuilderWorldEffects {
 	private static final RenderStateDataKey<List<GrandBuilderClientEffects.ActorFrame>> ACTORS = RenderStateDataKey.create();
 	private static final RenderStateDataKey<List<GrandBuilderClientEffects.BoltFrame>> BOLTS = RenderStateDataKey.create();
 	private static final RenderStateDataKey<List<KineticBlockRenderer.BlockFrame>> BLOCKS = RenderStateDataKey.create();
+	private static final RenderStateDataKey<List<StructurePreviewPayload>> PREVIEWS = RenderStateDataKey.create();
 	private static final RenderType SOLID = layer("effect_solid", false, true);
 	private static final RenderType VEIL = layer("effect_veil", false, false);
 	private static final RenderType GLOW = layer("effect_glow", true, false);
@@ -78,7 +80,11 @@ public final class GrandBuilderWorldEffects {
 		context.worldState().setData(SCENES, GrandBuilderClientEffects.extract(partialTick));
 		context.worldState().setData(ACTORS, GrandBuilderClientEffects.extractActors(partialTick));
 		context.worldState().setData(BOLTS, GrandBuilderClientEffects.extractBolts(partialTick));
-		context.worldState().setData(BLOCKS, KineticBlockRenderer.extract(partialTick, context.worldState().cameraRenderState.pos));
+		Vec3 camera = context.worldState().cameraRenderState.pos;
+		List<KineticBlockRenderer.BlockFrame> blocks = new java.util.ArrayList<>(KineticBlockRenderer.extract(partialTick, camera));
+		blocks.addAll(KineticBlockRenderer.extractPreview(camera));
+		context.worldState().setData(BLOCKS, List.copyOf(blocks));
+		context.worldState().setData(PREVIEWS, StructurePreviewClientState.visible(camera));
 	}
 
 	private static void draw(WorldRenderContext context) {
@@ -86,7 +92,9 @@ public final class GrandBuilderWorldEffects {
 		List<GrandBuilderClientEffects.ActorFrame> actors = context.worldState().getData(ACTORS);
 		List<GrandBuilderClientEffects.BoltFrame> bolts = context.worldState().getData(BOLTS);
 		List<KineticBlockRenderer.BlockFrame> blocks = context.worldState().getData(BLOCKS);
-		if (frames == null || actors == null || bolts == null || (frames.isEmpty() && actors.isEmpty() && bolts.isEmpty())) return;
+		List<StructurePreviewPayload> previews = context.worldState().getData(PREVIEWS);
+		if (frames == null || actors == null || bolts == null || (frames.isEmpty() && actors.isEmpty() && bolts.isEmpty()
+			&& (blocks == null || blocks.isEmpty()) && (previews == null || previews.isEmpty()))) return;
 		Vec3 camera = context.worldState().cameraRenderState.pos;
 		VertexConsumer solid = buffers.getBuffer(SOLID);
 		VertexConsumer veil = buffers.getBuffer(VEIL);
@@ -116,6 +124,12 @@ public final class GrandBuilderWorldEffects {
 			matrices.pushPose();
 			matrices.translate(bolt.x()-camera.x,bolt.y()-camera.y,bolt.z()-camera.z);
 			EffectGeometry.emitLightning(bolt,sink);
+			matrices.popPose();
+		}
+		if (previews != null && !previews.isEmpty()) {
+			matrices.pushPose();
+			matrices.translate(-camera.x, -camera.y, -camera.z);
+			for (StructurePreviewPayload preview : previews) EffectGeometry.emitPreviewBounds(preview, sink);
 			matrices.popPose();
 		}
 		buffers.endBatch(SOLID);

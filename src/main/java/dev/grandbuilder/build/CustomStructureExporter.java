@@ -32,6 +32,20 @@ public final class CustomStructureExporter {
 	private CustomStructureExporter() {
 	}
 
+	public static Path exportImported(String name, List<GrandPalaceBlueprint.RelativeBlock> blocks) throws IOException {
+		if (blocks.isEmpty()) throw new IOException("Empty world import");
+		Path directory = StructureLibrary.structuresDirectory();
+		Files.createDirectories(directory);
+		String token=sanitize(name);
+		if (token.length()>80) token=token.substring(0,80);
+		String baseName = "world_" + token + "_" + LocalDateTime.now().format(FILE_TIMESTAMP);
+		Path file = directory.resolve(baseName + ".schem");
+		for (int suffix=2;Files.exists(file);suffix++) file=directory.resolve(baseName+"_"+suffix+".schem");
+		NormalizedBlocks normalized = normalize(blocks);
+		writeSpongeSchem(file, normalized);
+		return file;
+	}
+
 	public static ExportResult export(
 		ServerPlayer player,
 		List<GrandPalaceBlueprint.RelativeBlock> blocks,

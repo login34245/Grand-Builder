@@ -11,6 +11,7 @@ import dev.grandbuilder.network.HerobrinePlacementPayload;
 import dev.grandbuilder.network.KineticBuildPayload;
 import dev.grandbuilder.network.BuildControlAction;
 import dev.grandbuilder.network.BuildStatusPayload;
+import dev.grandbuilder.network.StructurePreviewPayload;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -94,6 +95,7 @@ public final class AnimatedBuildManager {
 	public static BuildEffectMode getEffectMode(UUID playerId) {
 		return EFFECT_MODE_BY_PLAYER.getOrDefault(playerId, BuildEffectMode.STANDARD);
 	}
+	static List<GrandPalaceBlueprint.RelativeBlock> capturedBlueprint(UUID playerId) { return CUSTOM_BLUEPRINT_BY_PLAYER.get(playerId); }
 
 	public static void setOptions(UUID playerId, BuildOptions options) {
 		OPTIONS_BY_PLAYER.put(playerId, options.normalized(getEffectMode(playerId)));
@@ -185,6 +187,7 @@ public final class AnimatedBuildManager {
 			config
 		);
 		PENDING_PREVIEW_BY_PLAYER.put(player.getUUID(), preview);
+		sendPreviewModel(player, preview);
 		sendBuildStatus(player, false);
 
 		BuildSpeed speed = getSpeed(player.getUUID());
@@ -234,6 +237,7 @@ public final class AnimatedBuildManager {
 		}
 		if (!preview.dimensionKey.equals(player.level().dimension())) {
 			PENDING_PREVIEW_BY_PLAYER.remove(player.getUUID());
+			stopPreviewModel(player);
 			player.displayClientMessage(Component.translatable("message.grand_builder.preview_dimension_changed"), true);
 			return;
 		}
@@ -252,6 +256,7 @@ public final class AnimatedBuildManager {
 		}
 
 		PENDING_PREVIEW_BY_PLAYER.remove(player.getUUID());
+		stopPreviewModel(player);
 		BuildJob job = createBuildJob(player, preview.structureName(), preview.blocks, preview.origin, preview.facing, preview.effectMode(), preview.options);
 		if (job == null) {
 			return;
@@ -287,6 +292,7 @@ public final class AnimatedBuildManager {
 			return;
 		}
 		if (PENDING_PREVIEW_BY_PLAYER.remove(player.getUUID()) != null) {
+			stopPreviewModel(player);
 			player.displayClientMessage(Component.translatable("message.grand_builder.preview_canceled"), true);
 		}
 	}
@@ -325,7 +331,20 @@ public final class AnimatedBuildManager {
 		updated.tickCounter = preview.tickCounter;
 		updated.editsThisTick.addAll(preview.editsThisTick);
 		PENDING_PREVIEW_BY_PLAYER.put(player.getUUID(), updated);
+		sendPreviewModel(player, updated);
 		sendBuildStatus(player, false);
+	}
+
+	private static void sendPreviewModel(ServerPlayer player, PendingPreview preview) {
+		if (!ServerPlayNetworking.canSend(player, StructurePreviewPayload.TYPE)) return;
+		ServerPlayNetworking.send(player, StructurePreviewSampler.blueprint(StructurePreviewPayload.BUILD,
+			preview.dimensionKey.identifier(), preview.origin, preview.facing, preview.blocks));
+	}
+
+	private static void stopPreviewModel(ServerPlayer player) {
+		if (!ServerPlayNetworking.canSend(player, StructurePreviewPayload.TYPE)) return;
+		ServerPlayNetworking.send(player, new StructurePreviewPayload(StructurePreviewPayload.BUILD, false,
+			player.level().dimension().identifier(), player.blockPosition(), player.blockPosition(), List.of()));
 	}
 
 	public static void tryStartBuild(ServerPlayer player) {
@@ -366,6 +385,7 @@ public final class AnimatedBuildManager {
 		CUSTOM_BLUEPRINT_BY_PLAYER.put(player.getUUID(), captured);
 		SELECTION_KEY_BY_PLAYER.put(player.getUUID(), BuildStructure.CUSTOM.selectionKey());
 		PENDING_PREVIEW_BY_PLAYER.remove(player.getUUID());
+		stopPreviewModel(player);
 
 		if (capturedStructure.hitLimit()) {
 			player.displayClientMessage(Component.translatable("message.grand_builder.capture_saved_limited", captured.size(), config.maxCaptureBlocks), true);
@@ -712,6 +732,7 @@ public final class AnimatedBuildManager {
 		LAST_ACTION_TICK_BY_PLAYER.put(player.getUUID(), now);
 		PENDING_ROLLBACK_CONFIRM_UNTIL_TICK.remove(player.getUUID());
 		PENDING_PREVIEW_BY_PLAYER.remove(player.getUUID());
+		stopPreviewModel(player);
 
 		BuildJob activeJob = removeActiveJob(player.getUUID());
 		RollbackData rollback = activeJob != null ? activeJob.rollbackData : popRollback(player.getUUID());
@@ -825,6 +846,7 @@ public final class AnimatedBuildManager {
 			}
 			if (!isHoldingStructureCore(owner)) {
 				previewIterator.remove();
+				stopPreviewModel(owner);
 				owner.displayClientMessage(Component.translatable("message.grand_builder.preview_canceled_hand"), true);
 				continue;
 			}
@@ -832,6 +854,7 @@ public final class AnimatedBuildManager {
 			PendingPreview preview = entry.getValue();
 			if (!preview.dimensionKey.equals(owner.level().dimension())) {
 				previewIterator.remove();
+				stopPreviewModel(owner);
 				owner.displayClientMessage(Component.translatable("message.grand_builder.preview_dimension_changed"), true);
 				continue;
 			}
@@ -1754,11 +1777,11 @@ public final class AnimatedBuildManager {
 		};
 	}
 
-	private static BlockState rotateState(BlockState state, Direction facing) {
+	static BlockState rotateState(BlockState state, Direction facing) {
 		return state.rotate(rotationForFacing(facing));
 	}
 
-	private static BlockPos transform(BlockPos origin, Direction facing, GrandPalaceBlueprint.RelativeBlock block) {
+	static BlockPos transform(BlockPos origin, Direction facing, GrandPalaceBlueprint.RelativeBlock block) {
 		int x = block.x();
 		int z = block.z();
 		int rotatedX;
@@ -1947,29 +1970,9 @@ public final class AnimatedBuildManager {
 		}
 
 		private void tick(ServerLevel level, GrandBuilderConfig config) {
-			if (blocks.isEmpty()) {
-				return;
-			}
 			tickCounter++;
-			if ((tickCounter % Math.max(1, config.previewParticleIntervalTicks)) == 0) {
-				int drawCount = Math.min(Math.max(1, config.previewParticlesPerTick), sampledBlockIndexes.length);
-				for (int i = 0; i < drawCount; i++) {
-					int sampledIndex = sampledBlockIndexes[(sampleCursor + i) % sampledBlockIndexes.length];
-					GrandPalaceBlueprint.RelativeBlock block = blocks.get(sampledIndex);
-					BlockPos pos = transform(origin, facing, block);
-					if (!level.isInWorldBounds(pos)) {
-						continue;
-					}
-					BlockState state = rotateState(block.state(), facing);
-					level.sendParticles(new BlockParticleOption(ParticleTypes.BLOCK_MARKER, state), pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5, 1, 0.0, 0.0, 0.0, 0.0);
-				}
-				sampleCursor = (sampleCursor + drawCount) % sampledBlockIndexes.length;
-				drawConflictMarkers(level, Math.min(MAX_CONFLICT_MARKERS_PER_TICK, Math.max(2, drawCount / 12)));
-			}
-
-			if ((tickCounter % Math.max(2, config.previewBoundsIntervalTicks)) == 0) {
-				drawBounds(level);
-			}
+			if (tickCounter % Math.max(1,config.previewParticleIntervalTicks)==0)
+				drawConflictMarkers(level,Math.min(MAX_CONFLICT_MARKERS_PER_TICK,Math.max(2,config.previewParticlesPerTick/12)));
 		}
 
 		private int[] sampleConflictIndexes(ServerLevel level, GrandBuilderConfig config) {

@@ -9,6 +9,7 @@ import dev.grandbuilder.build.BuildSpeed;
 import dev.grandbuilder.build.CustomCaptureFormat;
 import dev.grandbuilder.build.StructureSelectionManager;
 import dev.grandbuilder.build.StructureLibrary;
+import dev.grandbuilder.build.WorldImportManager;
 import dev.grandbuilder.config.GrandBuilderConfig;
 import dev.grandbuilder.item.StructureCoreItem;
 import dev.grandbuilder.item.StructureSelectorItem;
@@ -25,6 +26,10 @@ import dev.grandbuilder.network.BuildSetSpeedPayload;
 import dev.grandbuilder.network.BuildStatusPayload;
 import dev.grandbuilder.network.CaptureRequestPayload;
 import dev.grandbuilder.network.StructureListPayload;
+import dev.grandbuilder.network.StructurePreviewPayload;
+import dev.grandbuilder.network.StructureInspectRequestPayload;
+import dev.grandbuilder.network.WorldImportRequestPayload;
+import dev.grandbuilder.network.WorldImportStatePayload;
 import static net.minecraft.commands.Commands.literal;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.player.AttackBlockCallback;
@@ -109,6 +114,10 @@ public class GrandBuilderMod implements ModInitializer {
 		PayloadTypeRegistry.playS2C().register(KineticBuildPayload.TYPE, KineticBuildPayload.CODEC);
 		PayloadTypeRegistry.playS2C().register(BuildStatusPayload.TYPE, BuildStatusPayload.CODEC);
 		PayloadTypeRegistry.playS2C().register(StructureListPayload.TYPE, StructureListPayload.CODEC);
+		PayloadTypeRegistry.playS2C().register(StructurePreviewPayload.TYPE, StructurePreviewPayload.CODEC);
+		PayloadTypeRegistry.playC2S().register(StructureInspectRequestPayload.TYPE, StructureInspectRequestPayload.CODEC);
+		PayloadTypeRegistry.playC2S().register(WorldImportRequestPayload.TYPE, WorldImportRequestPayload.CODEC);
+		PayloadTypeRegistry.playS2C().register(WorldImportStatePayload.TYPE, WorldImportStatePayload.CODEC);
 
 		AttackBlockCallback.EVENT.register((player, world, hand, pos, direction) -> {
 			if (!player.getItemInHand(hand).is(STRUCTURE_SELECTOR)) {
@@ -170,15 +179,23 @@ public class GrandBuilderMod implements ModInitializer {
 			AnimatedBuildManager.captureCustomStructure(context.player(), payload.format());
 			sendStructureList(context.player());
 		}));
+		ServerPlayNetworking.registerGlobalReceiver(StructureInspectRequestPayload.TYPE, (payload, context) ->
+			context.server().execute(() -> WorldImportManager.inspect(context.player(), payload.structureKey())));
+		ServerPlayNetworking.registerGlobalReceiver(WorldImportRequestPayload.TYPE, (payload, context) ->
+			context.server().execute(() -> WorldImportManager.handle(context.player(), payload)));
 
 		ServerTickEvents.END_SERVER_TICK.register(server -> {
 			AnimatedBuildManager.tick(server);
 			StructureSelectionManager.tick(server);
 		});
-		ServerPlayConnectionEvents.DISCONNECT.register((handler, server) ->
-			server.execute(() -> AnimatedBuildManager.onPlayerDisconnect(handler.player))
-		);
-		ServerLifecycleEvents.SERVER_STOPPING.register(server -> AnimatedBuildManager.shutdown());
+		ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> server.execute(() -> {
+			AnimatedBuildManager.onPlayerDisconnect(handler.player);
+			WorldImportManager.onDisconnect(handler.player);
+		}));
+		ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
+			AnimatedBuildManager.shutdown();
+			WorldImportManager.clear();
+		});
 
 		CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
 			dispatcher.register(literal("grandbuilder")

@@ -7,6 +7,8 @@ import dev.grandbuilder.client.GrandBuilderClientEffects;
 import dev.grandbuilder.client.GrandBuilderWorldEffects;
 import dev.grandbuilder.client.PreviewConfirmState;
 import dev.grandbuilder.client.StructureListClientState;
+import dev.grandbuilder.client.StructurePreviewClientState;
+import dev.grandbuilder.client.WorldImportClientState;
 import dev.grandbuilder.network.BuildControlAction;
 import dev.grandbuilder.network.BuildControlPayload;
 import dev.grandbuilder.network.BuildEffectPayload;
@@ -16,6 +18,8 @@ import dev.grandbuilder.network.HerobrinePlacementPayload;
 import dev.grandbuilder.network.KineticBuildPayload;
 import dev.grandbuilder.network.BuildStatusPayload;
 import dev.grandbuilder.network.StructureListPayload;
+import dev.grandbuilder.network.StructurePreviewPayload;
+import dev.grandbuilder.network.WorldImportStatePayload;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
@@ -94,6 +98,12 @@ public class GrandBuilderModClient implements ClientModInitializer {
 		ClientPlayNetworking.registerGlobalReceiver(StructureListPayload.TYPE, (payload, context) ->
 			context.client().execute(() -> StructureListClientState.update(payload))
 		);
+		ClientPlayNetworking.registerGlobalReceiver(StructurePreviewPayload.TYPE, (payload, context) ->
+			context.client().execute(() -> StructurePreviewClientState.update(payload))
+		);
+		ClientPlayNetworking.registerGlobalReceiver(WorldImportStatePayload.TYPE, (payload, context) ->
+			context.client().execute(() -> WorldImportClientState.update(payload))
+		);
 		ClientPlayNetworking.registerGlobalReceiver(BuildEffectPayload.TYPE, (payload, context) ->
 			context.client().execute(() -> GrandBuilderClientEffects.trigger(payload))
 		);
@@ -113,9 +123,11 @@ public class GrandBuilderModClient implements ClientModInitializer {
 
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
 			GrandBuilderClientEffects.tick(client);
+			StructurePreviewClientState.tick(client);
 			for (PreviewKey key : PREVIEW_KEYS) key.tick(client.player != null && client.screen == null && PreviewConfirmState.isAwaitingConfirm());
 			if (client.player == null) {
 				PreviewConfirmState.disarm();
+				WorldImportClientState.clear();
 				return;
 			}
 

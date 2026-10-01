@@ -2,6 +2,7 @@ package dev.grandbuilder.client;
 
 import dev.grandbuilder.build.BuildStartSide;
 import dev.grandbuilder.network.BuildEffectPayload;
+import dev.grandbuilder.network.StructurePreviewPayload;
 import java.util.ArrayDeque;
 import org.joml.Matrix4f;
 import org.joml.Vector3f;
@@ -20,6 +21,20 @@ public final class EffectGeometry {
 	private static final int VIOLET = 0xB996FF;
 
 	private EffectGeometry() {
+	}
+
+	public static void emitPreviewBounds(StructurePreviewPayload preview, Sink sink) {
+		Mesh mesh = new Mesh(sink, 1);
+		double x0 = preview.min().getX(), x1 = preview.max().getX() + 1;
+		double y0 = preview.min().getY(), y1 = preview.max().getY() + 1;
+		double z0 = preview.min().getZ(), z1 = preview.max().getZ() + 1;
+		int color = preview.kind() == StructurePreviewPayload.IMPORT ? 0x55DDF5 : 0xF6B567;
+		for (double y : new double[] {y0, y1}) for (double z : new double[] {z0, z1})
+			mesh.tube(x0, y, z, x1, y, z, 0.025, color, Material.GLOW, 0.85);
+		for (double x : new double[] {x0, x1}) for (double z : new double[] {z0, z1})
+			mesh.tube(x, y0, z, x, y1, z, 0.025, color, Material.GLOW, 0.85);
+		for (double x : new double[] {x0, x1}) for (double y : new double[] {y0, y1})
+			mesh.tube(x, y, z0, x, y, z1, 0.025, color, Material.GLOW, 0.85);
 	}
 
 	public static void emit(GrandBuilderClientEffects.Frame frame, Sink sink) {

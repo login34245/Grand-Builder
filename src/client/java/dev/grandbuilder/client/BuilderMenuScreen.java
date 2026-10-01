@@ -14,6 +14,7 @@ import dev.grandbuilder.network.BuildEstimateRequestPayload;
 import dev.grandbuilder.network.BuildEstimatePayload;
 import dev.grandbuilder.network.BuildSetSpeedPayload;
 import dev.grandbuilder.network.CaptureRequestPayload;
+import dev.grandbuilder.network.StructureInspectRequestPayload;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -57,6 +58,8 @@ public class BuilderMenuScreen extends Screen {
 	private CustomCaptureFormat selectedCaptureFormat = lastCaptureFormat;
 	private Button structureButton;
 	private Button folderButton;
+	private Button inspectButton;
+	private Button importButton;
 	private Button speedButton;
 	private Button terrainButton;
 	private Button effectButton;
@@ -109,6 +112,8 @@ public class BuilderMenuScreen extends Screen {
 		int statusTerrainY,
 		int structureButtonWidth,
 		int folderButtonWidth,
+		int inspectButtonWidth,
+		int importButtonWidth,
 		int splitLeft,
 		int splitRight,
 		int halfWidth,
@@ -124,6 +129,7 @@ public class BuilderMenuScreen extends Screen {
 	public BuilderMenuScreen() {
 		super(Component.translatable("screen.grand_builder.title"));
 	}
+	public static void rememberStructure(String key) { lastStructureKey=key; }
 
 	@Override
 	protected void init() {
@@ -142,6 +148,17 @@ public class BuilderMenuScreen extends Screen {
 			fitButtonMessage(Component.translatable("screen.grand_builder.open_structures"), layout.folderButtonWidth()),
 			button -> openStructuresFolder()
 		).bounds(layout.innerLeft() + layout.structureButtonWidth() + 4, layout.structureButtonY(), layout.folderButtonWidth(), layout.buttonHeight()).build());
+		this.inspectButton = this.addRenderableWidget(Button.builder(Component.literal("3D"), button -> {
+			ClientPlayNetworking.send(new StructureInspectRequestPayload(currentSelection().key()));
+			this.minecraft.setScreen(new StructureInspectScreen(dev.grandbuilder.network.StructurePreviewPayload.INSPECT));
+		}).bounds(layout.innerLeft()+layout.structureButtonWidth()+layout.folderButtonWidth()+8,
+			layout.structureButtonY(),layout.inspectButtonWidth(),layout.buttonHeight()).build());
+		this.inspectButton.setTooltip(Tooltip.create(Component.translatable("screen.grand_builder.inspect_tooltip")));
+		this.importButton = this.addRenderableWidget(Button.builder(
+			fitButtonMessage(Component.translatable("screen.grand_builder.import.button"),layout.importButtonWidth()),
+			button -> this.minecraft.setScreen(new WorldImportScreen()))
+			.bounds(layout.innerLeft()+layout.structureButtonWidth()+layout.folderButtonWidth()+layout.inspectButtonWidth()+12,
+				layout.structureButtonY(),layout.importButtonWidth(),layout.buttonHeight()).build());
 
 		this.speedButton = this.addRenderableWidget(Button.builder(fitButtonMessage(speedMessage(), layout.splitLeft()), button -> {
 			this.selectedSpeed = this.selectedSpeed.next();
@@ -265,11 +282,10 @@ public class BuilderMenuScreen extends Screen {
 		int statusTerrainY = statusEtaY + 10;
 		int bottomLimit = top + panelHeight - 8;
 
-		int folderButtonWidth = Math.min(compact ? 60 : 72, Math.max(46, contentWidth / 3));
-		if (contentWidth - folderButtonWidth - 4 < 80) {
-			folderButtonWidth = Math.max(42, contentWidth - 84);
-		}
-		int structureButtonWidth = Math.max(60, contentWidth - folderButtonWidth - 4);
+		int folderButtonWidth = compact ? 46 : 56;
+		int inspectButtonWidth = 26;
+		int importButtonWidth = compact ? 42 : 50;
+		int structureButtonWidth = Math.max(56, contentWidth - folderButtonWidth - inspectButtonWidth - importButtonWidth - 12);
 		int splitLeft = Math.max(42, (contentWidth - 4) / 2);
 		int splitRight = contentWidth - splitLeft - 4;
 		if (splitRight < 42) {
@@ -318,6 +334,8 @@ public class BuilderMenuScreen extends Screen {
 			statusTerrainY,
 			structureButtonWidth,
 			folderButtonWidth,
+			inspectButtonWidth,
+			importButtonWidth,
 			splitLeft,
 			splitRight,
 			halfWidth,
@@ -459,6 +477,7 @@ public class BuilderMenuScreen extends Screen {
 	private void refreshButtonMessages() {
 		setFittedMessage(this.structureButton, structureMessage());
 		setFittedMessage(this.folderButton, Component.translatable("screen.grand_builder.open_structures"));
+		setFittedMessage(this.importButton, Component.translatable("screen.grand_builder.import.button"));
 		setFittedMessage(this.speedButton, speedMessage());
 		setFittedMessage(this.terrainButton, terrainMessage());
 		setFittedMessage(this.effectButton, effectMessage());
@@ -481,6 +500,8 @@ public class BuilderMenuScreen extends Screen {
 		boolean showTerrain = selectedEffectMode != BuildEffectMode.DISMANTLE;
 		if (this.structureButton != null) this.structureButton.setY(layout.structureButtonY());
 		if (this.folderButton != null) this.folderButton.setY(layout.structureButtonY());
+		if (this.inspectButton != null) this.inspectButton.setY(layout.structureButtonY());
+		if (this.importButton != null) this.importButton.setY(layout.structureButtonY());
 		if (this.effectButton != null) this.effectButton.setY(layout.effectButtonY());
 		if (this.captureFormatButton != null) this.captureFormatButton.setY(layout.captureButtonY());
 		if (this.startButton != null) this.startButton.setY(layout.actionsButtonY());
@@ -488,7 +509,7 @@ public class BuilderMenuScreen extends Screen {
 		if (this.pauseResumeButton != null) this.pauseResumeButton.setY(layout.pauseButtonY());
 		if (this.rollbackButton != null) this.rollbackButton.setY(layout.pauseButtonY());
 		if (this.cancelPreviewButton != null) this.cancelPreviewButton.setY(layout.cancelButtonY());
-		for (Button button : new Button[] {structureButton,folderButton,effectButton,captureFormatButton,startButton,captureButton,
+		for (Button button : new Button[] {structureButton,folderButton,inspectButton,importButton,effectButton,captureFormatButton,startButton,captureButton,
 			pauseResumeButton,rollbackButton,cancelPreviewButton}) if (button != null) button.setHeight(layout.buttonHeight());
 		if (this.optionsButton != null) {
 			this.optionsButton.visible = hasModeOptions();

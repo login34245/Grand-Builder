@@ -2,6 +2,7 @@ package dev.grandbuilder.client;
 
 import com.mojang.blaze3d.vertex.PoseStack;
 import dev.grandbuilder.network.KineticBuildPayload;
+import dev.grandbuilder.network.StructurePreviewPayload;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.LinkedHashMap;
@@ -13,6 +14,7 @@ import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.block.model.BakedQuad;
 import net.minecraft.client.renderer.block.model.BlockStateModel;
 import net.minecraft.client.renderer.rendertype.RenderType;
+import net.minecraft.client.renderer.rendertype.RenderTypes;
 import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.core.Direction;
 import net.minecraft.util.RandomSource;
@@ -27,7 +29,7 @@ public final class KineticBlockRenderer {
 	private record CachedModel(BlockStateModel model, List<BakedQuad> quads) { }
 	private static final Map<ModelKey, CachedModel> MODELS = new LinkedHashMap<>();
 	public record BlockFrame(double x, double y, double z, KineticGeometry.Pose pose,
-		List<BakedQuad> quads, RenderType layer, int tint) { }
+		List<BakedQuad> quads, RenderType layer, int tint, float alpha) { }
 	private KineticBlockRenderer() { }
 
 	public static List<BlockFrame> extract(float partialTick, Vec3 camera) {
@@ -43,24 +45,47 @@ public final class KineticBlockRenderer {
 				if (pose == null || result.size() >= 4096) continue;
 				BlockState state = Block.stateById(cell.stateId());
 				if (state.getRenderShape() != RenderShape.MODEL) continue;
-				BlockStateModel model = client.getBlockRenderer().getBlockModel(state);
-				ModelKey key = new ModelKey(cell.stateId(), cell.index() & 7);
-				CachedModel cached = MODELS.get(key);
-				if (cached == null || cached.model() != model) {
-					List<BakedQuad> quads = new ArrayList<>();
-					for (var part : model.collectParts(RandomSource.create(key.variant()))) {
-						quads.addAll(part.getQuads(null));
-						for (Direction face : Direction.values()) quads.addAll(part.getQuads(face));
-					}
-					cached = new CachedModel(model, List.copyOf(quads));
-					if (MODELS.size() >= 512) MODELS.remove(MODELS.keySet().iterator().next());
-					MODELS.put(key, cached);
-				}
+				CachedModel cached = model(client, state, cell.stateId(), cell.index() & 7);
 				int tint = client.getBlockColors().getColor(state, client.level, cell.target(), 0);
-				result.add(new BlockFrame(f.x(), f.y(), f.z(), pose, cached.quads(), ItemBlockRenderTypes.getMovingBlockRenderType(state), tint));
+				result.add(new BlockFrame(f.x(), f.y(), f.z(), pose, cached.quads(), ItemBlockRenderTypes.getMovingBlockRenderType(state), tint, 1));
 			}
 		}
 		return List.copyOf(result);
+	}
+	public static List<BlockFrame> extractPreview(Vec3 camera) {
+		Minecraft client = Minecraft.getInstance();
+		if (client.level == null) return List.of();
+		List<BlockFrame> result = new ArrayList<>();
+		for (StructurePreviewPayload preview : StructurePreviewClientState.visible(camera)) {
+			for (StructurePreviewPayload.Cell cell : preview.cells()) {
+				if (result.size() >= StructurePreviewPayload.MAX_CELLS) break;
+				BlockState state = Block.stateById(cell.stateId());
+				if (state.getRenderShape() != RenderShape.MODEL) continue;
+				CachedModel cached = model(client, state, cell.stateId(), cell.target().hashCode() & 7);
+				if (cached.quads().isEmpty()) continue;
+				int tint = client.getBlockColors().getColor(state, client.level, cell.target(), 0);
+				KineticGeometry.Pose pose = new KineticGeometry.Pose(cell.target().getX() + 0.5,
+					cell.target().getY() + 0.5, cell.target().getZ() + 0.5, 0, 0, 0, 1);
+				result.add(new BlockFrame(0, 0, 0, pose, cached.quads(), RenderTypes.translucentMovingBlock(), tint, 0.64f));
+			}
+		}
+		return List.copyOf(result);
+	}
+	private static CachedModel model(Minecraft client, BlockState state, int stateId, int variant) {
+		BlockStateModel blockModel = client.getBlockRenderer().getBlockModel(state);
+		ModelKey key = new ModelKey(stateId, variant);
+		CachedModel cached = MODELS.get(key);
+		if (cached == null || cached.model() != blockModel) {
+			List<BakedQuad> quads = new ArrayList<>();
+			for (var part : blockModel.collectParts(RandomSource.create(variant))) {
+				quads.addAll(part.getQuads(null));
+				for (Direction face : Direction.values()) quads.addAll(part.getQuads(face));
+			}
+			cached = new CachedModel(blockModel, List.copyOf(quads));
+			if (MODELS.size() >= 512) MODELS.remove(MODELS.keySet().iterator().next());
+			MODELS.put(key, cached);
+		}
+		return cached;
 	}
 
 	public static void draw(List<BlockFrame> frames, PoseStack matrices, Vec3 camera, MultiBufferSource buffers) {
@@ -81,7 +106,7 @@ public final class KineticBlockRenderer {
 					default -> 1;
 				} : 1;
 				consumer.putBulkData(matrices.last(), quad, ((color >> 16) & 255) / 255f * shade,
-					((color >> 8) & 255) / 255f * shade, (color & 255) / 255f * shade, 1,
+					((color >> 8) & 255) / 255f * shade, (color & 255) / 255f * shade, frame.alpha(),
 					LightTexture.FULL_BRIGHT, OverlayTexture.NO_OVERLAY);
 			}
 			matrices.popPose();

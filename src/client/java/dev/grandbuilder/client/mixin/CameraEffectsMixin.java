@@ -1,6 +1,9 @@
 package dev.grandbuilder.client.mixin;
 
 import dev.grandbuilder.client.GrandBuilderClientEffects;
+import dev.grandbuilder.client.PreviewOrbit;
+import net.minecraft.client.Minecraft;
+import net.minecraft.world.phys.Vec3;
 import net.minecraft.client.Camera;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.Level;
@@ -14,10 +17,15 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public abstract class CameraEffectsMixin {
 	@Shadow
 	protected abstract void setRotation(float yaw, float pitch);
+	@Shadow protected abstract void setPosition(Vec3 position);
 
 	@Inject(method = "setup", at = @At("TAIL"))
 	private void grandBuilder$impact(Level level, Entity entity, boolean detached, boolean mirrored,
 		float partialTick, CallbackInfo ci) {
+		if (Minecraft.getInstance().screen instanceof PreviewOrbit.View view) {
+			PreviewOrbit.Pose pose=view.orbit().pose(view);
+			if (pose!=null) { setRotation(pose.yaw(),pose.pitch()); setPosition(pose.position()); return; }
+		}
 		float power = GrandBuilderClientEffects.shake(partialTick);
 		if (power <= 0.0f) {
 			return;

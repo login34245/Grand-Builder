@@ -738,12 +738,13 @@ public final class StructureLibrary {
 		int maxY = Integer.MIN_VALUE;
 		int maxZ = Integer.MIN_VALUE;
 		boolean hasSolidBlocks = false;
+		boolean preserveCrop = sourceToken.startsWith("world_");
 
 		for (RawBlock block : rawBlocks) {
-			if (block.state().isAir()) {
+			if (block.state().isAir() && !preserveCrop) {
 				continue;
 			}
-			hasSolidBlocks = true;
+			hasSolidBlocks |= !block.state().isAir();
 			minX = Math.min(minX, block.x());
 			minY = Math.min(minY, block.y());
 			minZ = Math.min(minZ, block.z());
@@ -1184,7 +1185,7 @@ public final class StructureLibrary {
 		return state;
 	}
 
-	private static BlockState readBlockState(CompoundTag stateTag) {
+	static BlockState readBlockState(CompoundTag stateTag) {
 		String blockName = stateTag.getStringOr("Name", "minecraft:air");
 		Identifier id = Identifier.tryParse(normalizeBlockName(blockName));
 		Block block = id == null ? Blocks.AIR : BuiltInRegistries.BLOCK.getOptional(id).orElse(Blocks.AIR);
