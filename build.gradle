@@ -76,8 +76,15 @@ tasks.register('verifyEffectGeometry', JavaExec) {
 	mainClass = 'dev.grandbuilder.client.EffectGeometryTest'
 }
 
+tasks.register('verifyWorldImport', JavaExec) {
+	dependsOn geometryTestClasses
+	classpath = sourceSets.geometryTest.runtimeClasspath
+	mainClass = 'dev.grandbuilder.build.WorldMapImporterTest'
+	if (project.hasProperty('importTestWorld')) args project.property('importTestWorld')
+}
+
 tasks.named('check') {
-	dependsOn verifyEffectGeometry
+	dependsOn verifyEffectGeometry, verifyWorldImport
 }
 
 jar {

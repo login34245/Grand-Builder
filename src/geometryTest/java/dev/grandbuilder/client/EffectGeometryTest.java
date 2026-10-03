@@ -68,10 +68,38 @@ public final class EffectGeometryTest {
 		verifyCadence();
 		verifyKinetic();
 		verifyPreviewPlacement();
+		verifyInspectionCamera();
 		check(BuildEffectMode.AURORA_WEAVE.networkId() == 5 && BuildEffectMode.HEROBRINE.networkId() == 6
 			&& BuildEffectMode.BUILDER_CHARGE.networkId() == 7, "Existing mode IDs changed");
 		check(BuildEffectMode.BUILDER_CHARGE.hidesSpeed() && !BuildEffectMode.HEROBRINE.hidesSpeed(), "Wrong speed controls");
 		System.out.println("Effect geometry verified: " + samples + " scenes, " + actors + " actors, " + bolts + " bolts; standard cadence and mode options verified.");
+	}
+
+	private static void verifyInspectionCamera() {
+		var center = new net.minecraft.world.phys.Vec3(0, 180, 0);
+		for (int[] screen : new int[][] {{640,360,296}, {426,240,220}, {320,180,162}, {426,240,0}, {320,180,0}}) {
+			var orbit = new PreviewOrbit();
+			for (int turn = 0; turn < 4; turn++) {
+				var pose = orbit.pose(center,40,260,40,screen[0],screen[1],screen[2],70);
+				check(pose.position().distanceTo(center) <= 480.001, "Inspection camera loses visibility");
+				double yaw = Math.toRadians(pose.yaw()), pitch = Math.toRadians(pose.pitch());
+				var forward = new net.minecraft.world.phys.Vec3(-Math.sin(yaw)*Math.cos(pitch),-Math.sin(pitch),Math.cos(yaw)*Math.cos(pitch));
+				var right = new net.minecraft.world.phys.Vec3(-Math.cos(yaw),0,-Math.sin(yaw));
+				var up = new net.minecraft.world.phys.Vec3(-Math.sin(yaw)*Math.sin(pitch),Math.cos(pitch),Math.cos(yaw)*Math.sin(pitch));
+				double tangent = Math.tan(Math.toRadians(70)/2), aspect = (double)screen[0]/screen[1];
+				for (int x : new int[] {-20,20}) for (int y : new int[] {-130,130}) for (int z : new int[] {-20,20}) {
+					var relative = center.add(x,y,z).subtract(pose.position());
+					double depth = relative.dot(forward);
+					double sx = (1+relative.dot(right)/depth/(tangent*aspect))*screen[0]/2;
+					double sy = (1-relative.dot(up)/depth/tangent)*screen[1]/2;
+					check(depth>0 && sx>screen[2] && sx<screen[0], "Tower overlaps import controls or leaves viewport");
+					check(sy> (screen[2]==0?26:0) && sy<screen[1]-(screen[2]==0?28:0), "Tower is clipped by inspection controls");
+				}
+				orbit.drag(90,0);
+			}
+			orbit.zoom(-100);
+			check(orbit.pose(center,40,260,40,screen[0],screen[1],screen[2],70).position().distanceTo(center)<=480.001, "Zoom makes preview disappear");
+		}
 	}
 
 	private static void verifyPreviewPlacement() {

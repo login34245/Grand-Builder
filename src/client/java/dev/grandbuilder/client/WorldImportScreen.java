@@ -87,7 +87,8 @@ public final class WorldImportScreen extends Screen implements PreviewOrbit.View
 		if (state.candidates().isEmpty()) return Component.translatable("screen.grand_builder.import.no_candidates");
 		candidateIndex=Math.floorMod(candidateIndex,state.candidates().size());
 		WorldMapImporter.Bounds b=state.candidates().get(candidateIndex).bounds();
-		return Component.translatable("screen.grand_builder.import.candidate",candidateIndex+1,state.candidates().size(),
+		return Component.translatable(state.candidates().get(candidateIndex).partial()
+			? "screen.grand_builder.import.section" : "screen.grand_builder.import.candidate",candidateIndex+1,state.candidates().size(),
 			b.width(),b.height(),b.depth());
 	}
 	private void changeSource(int direction) {

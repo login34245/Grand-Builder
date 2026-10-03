@@ -200,7 +200,7 @@ public final class WorldImportManager {
 			source.name().length()>128 ? source.name().substring(0,128):source.name()));
 		List<WorldImportStatePayload.CandidateEntry> candidates=new ArrayList<>();
 		for (WorldMapImporter.Candidate candidate:session.candidates)
-			candidates.add(new WorldImportStatePayload.CandidateEntry(candidate.bounds(),candidate.score()));
+			candidates.add(new WorldImportStatePayload.CandidateEntry(candidate.bounds(),candidate.score(),candidate.partial()));
 		ServerPlayNetworking.send(player,new WorldImportStatePayload(sources,session.source==null?"":session.source.id(),
 			candidates,session.selected,session.crop==null?EMPTY:session.crop,status,session.savedKey));
 	}

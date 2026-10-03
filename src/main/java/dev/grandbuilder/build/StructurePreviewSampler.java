@@ -3,8 +3,10 @@ package dev.grandbuilder.build;
 import dev.grandbuilder.network.StructurePreviewPayload;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.resources.Identifier;
@@ -53,9 +55,40 @@ public final class StructurePreviewSampler {
 			int byX = Integer.compare(a.target().getX(), b.target().getX());
 			return byX != 0 ? byX : Integer.compare(a.target().getZ(), b.target().getZ());
 		});
-		int step = Math.max(1, (candidates.size() + StructurePreviewPayload.MAX_CELLS - 1) / StructurePreviewPayload.MAX_CELLS);
-		List<StructurePreviewPayload.Cell> sample = new ArrayList<>();
-		for (int i = 0; i < candidates.size(); i += step) sample.add(candidates.get(i));
+		List<StructurePreviewPayload.Cell> sample;
+		if (candidates.size() <= StructurePreviewPayload.MAX_CELLS) sample = candidates;
+		else {
+			// Keep the facade/roof continuous before spending the budget on interior detail.
+			Map<Long, StructurePreviewPayload.Cell[]> xRays = new HashMap<>(), yRays = new HashMap<>(), zRays = new HashMap<>();
+			for (var cell : candidates) {
+				BlockPos pos = cell.target();
+				outermost(xRays, pair(pos.getY(), pos.getZ()), cell, Direction.Axis.X);
+				outermost(yRays, pair(pos.getX(), pos.getZ()), cell, Direction.Axis.Y);
+				outermost(zRays, pair(pos.getX(), pos.getY()), cell, Direction.Axis.Z);
+			}
+			Set<Long> outer = new HashSet<>();
+			for (var rays : List.of(xRays, yRays, zRays)) for (var ends : rays.values()) {
+				outer.add(ends[0].target().asLong()); outer.add(ends[1].target().asLong());
+			}
+			List<StructurePreviewPayload.Cell> shell = new ArrayList<>(), interior = new ArrayList<>();
+			for (var cell : candidates) (outer.contains(cell.target().asLong()) ? shell : interior).add(cell);
+			sample = new ArrayList<>(StructurePreviewPayload.MAX_CELLS);
+			appendSample(sample, shell);
+			appendSample(sample, interior);
+		}
 		return new StructurePreviewPayload(kind, true, dimension, min, max, sample);
+	}
+	private static long pair(int a, int b) { return ((long)a << 32) | (b & 0xffffffffL); }
+	private static void outermost(Map<Long, StructurePreviewPayload.Cell[]> rays, long key, StructurePreviewPayload.Cell cell, Direction.Axis axis) {
+		var ends = rays.computeIfAbsent(key, ignored -> new StructurePreviewPayload.Cell[] {cell, cell});
+		int coordinate = cell.target().get(axis);
+		if (coordinate < ends[0].target().get(axis)) ends[0] = cell;
+		if (coordinate > ends[1].target().get(axis)) ends[1] = cell;
+	}
+	private static void appendSample(List<StructurePreviewPayload.Cell> result, List<StructurePreviewPayload.Cell> source) {
+		int budget = StructurePreviewPayload.MAX_CELLS - result.size();
+		if (budget <= 0) return;
+		int count = Math.min(budget, source.size());
+		for (int i = 0; i < count; i++) result.add(source.get((int)((long)i * source.size() / count)));
 	}
 }

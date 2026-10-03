@@ -14,13 +14,13 @@ public record StructurePreviewPayload(int kind, boolean active, Identifier dimen
 	public static final int BUILD = 0;
 	public static final int IMPORT = 1;
 	public static final int INSPECT = 2;
-	public static final int MAX_CELLS = 16384;
+	public static final int MAX_CELLS = 65536;
 	public record Cell(BlockPos target, int stateId) { }
 	public StructurePreviewPayload {
 		if (kind < BUILD || kind > INSPECT || cells.size() > MAX_CELLS) throw new IllegalArgumentException("Invalid preview");
 		cells = List.copyOf(cells);
 	}
-	public static final Type<StructurePreviewPayload> TYPE = new Type<>(GrandBuilderMod.id("structure_preview"));
+	public static final Type<StructurePreviewPayload> TYPE = new Type<>(Identifier.fromNamespaceAndPath(GrandBuilderMod.MOD_ID, "structure_preview"));
 	public static final StreamCodec<RegistryFriendlyByteBuf, StructurePreviewPayload> CODEC = StreamCodec.of(
 		(buffer, value) -> {
 			buffer.writeByte(value.kind());

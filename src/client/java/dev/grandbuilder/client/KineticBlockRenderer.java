@@ -1,6 +1,10 @@
 package dev.grandbuilder.client;
 
 import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.blaze3d.pipeline.BlendFunction;
+import com.mojang.blaze3d.pipeline.RenderPipeline;
+import dev.grandbuilder.GrandBuilderMod;
+import dev.grandbuilder.client.mixin.RenderTypeAccess;
 import dev.grandbuilder.network.KineticBuildPayload;
 import dev.grandbuilder.network.StructurePreviewPayload;
 import java.util.ArrayList;
@@ -11,10 +15,13 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.ItemBlockRenderTypes;
 import net.minecraft.client.renderer.LightTexture;
 import net.minecraft.client.renderer.MultiBufferSource;
+import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.client.renderer.block.model.BakedQuad;
 import net.minecraft.client.renderer.block.model.BlockStateModel;
 import net.minecraft.client.renderer.rendertype.RenderType;
 import net.minecraft.client.renderer.rendertype.RenderTypes;
+import net.minecraft.client.renderer.rendertype.RenderSetup;
+import net.minecraft.client.renderer.texture.TextureAtlas;
 import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.core.Direction;
 import net.minecraft.util.RandomSource;
@@ -31,6 +38,15 @@ public final class KineticBlockRenderer {
 	public record BlockFrame(double x, double y, double z, KineticGeometry.Pose pose,
 		List<BakedQuad> quads, RenderType layer, int tint, float alpha) { }
 	private KineticBlockRenderer() { }
+	public static RenderType inspectionLayer() { return InspectionLayer.TYPE; }
+	private static final class InspectionLayer {
+		private static final RenderType TYPE = RenderTypeAccess.grandBuilder$create("structure_inspection", RenderSetup.builder(
+			RenderPipeline.builder(RenderPipelines.BLOCK_SNIPPET)
+				.withLocation(GrandBuilderMod.id("pipeline/structure_inspection"))
+				.withFragmentShader(GrandBuilderMod.id("core/structure_inspection"))
+				.withBlend(BlendFunction.TRANSLUCENT).withDepthWrite(true).build())
+			.withTexture("Sampler0", TextureAtlas.LOCATION_BLOCKS).useLightmap().sortOnUpload().bufferSize(2 * 1024 * 1024).createRenderSetup());
+	}
 
 	public static List<BlockFrame> extract(float partialTick, Vec3 camera) {
 		Minecraft client = Minecraft.getInstance();
@@ -57,6 +73,7 @@ public final class KineticBlockRenderer {
 		if (client.level == null) return List.of();
 		List<BlockFrame> result = new ArrayList<>();
 		for (StructurePreviewPayload preview : StructurePreviewClientState.visible(camera)) {
+			boolean inspection = client.screen instanceof PreviewOrbit.View;
 			for (StructurePreviewPayload.Cell cell : preview.cells()) {
 				if (result.size() >= StructurePreviewPayload.MAX_CELLS) break;
 				BlockState state = Block.stateById(cell.stateId());
@@ -66,7 +83,7 @@ public final class KineticBlockRenderer {
 				int tint = client.getBlockColors().getColor(state, client.level, cell.target(), 0);
 				KineticGeometry.Pose pose = new KineticGeometry.Pose(cell.target().getX() + 0.5,
 					cell.target().getY() + 0.5, cell.target().getZ() + 0.5, 0, 0, 0, 1);
-				result.add(new BlockFrame(0, 0, 0, pose, cached.quads(), RenderTypes.translucentMovingBlock(), tint, 0.64f));
+				result.add(new BlockFrame(0, 0, 0, pose, cached.quads(), inspection ? inspectionLayer() : RenderTypes.translucentMovingBlock(), tint, inspection ? 1 : 0.64f));
 			}
 		}
 		return List.copyOf(result);

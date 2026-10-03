@@ -1,6 +1,5 @@
 package dev.grandbuilder.build;
 
-import dev.grandbuilder.GrandBuilderMod;
 import java.io.DataInputStream;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -12,6 +11,7 @@ import java.nio.channels.FileChannel;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -31,15 +31,20 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.NbtAccounter;
 import net.minecraft.nbt.NbtIo;
+import net.minecraft.nbt.NbtUtils;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.storage.RegionFileVersion;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public final class WorldMapImporter {
+	private static final Logger LOGGER = LoggerFactory.getLogger("grand_builder/world_import");
 	private static final Pattern REGION_NAME = Pattern.compile("r\\.(-?\\d+)\\.(-?\\d+)\\.mca");
 	private static final int MAX_SOURCES = 64, MAX_REGIONS = 96, MAX_CHUNKS = 4096;
 	private static final int MAX_CANDIDATES = 20, MAX_EVIDENCE_CELLS = 120000;
+	private static final int[] BUILDING_HEIGHT_CUTS = {4, 12, 24, 48, 96, 160};
 	private static final long MAX_REGION_BYTES = 64L * 1024 * 1024, MAX_VOLUME = 1000000;
 	private WorldMapImporter() { }
 
@@ -69,21 +74,35 @@ public final class WorldMapImporter {
 		}
 		public boolean valid() { return width() > 0 && height() > 0 && depth() > 0 && volume() <= MAX_VOLUME; }
 	}
-	public record Candidate(Bounds bounds, int score) { }
+	public record Candidate(Bounds bounds, int score, boolean partial) { }
 	public record StoredBlock(BlockState state, CompoundTag nbt) { }
 	public record Loaded(Bounds available, Map<Long, StoredBlock> blocks) {
-		public Loaded { blocks = Map.copyOf(blocks); }
+		// Packed BlockPos keys need HashMap's spread function for fast crop lookups.
+		public Loaded { blocks = Collections.unmodifiableMap(new HashMap<>(blocks)); }
 		public StoredBlock at(BlockPos pos) { return blocks.get(pos.asLong()); }
 	}
 	private record RegionRef(int x, int z, Path path, String zipEntry) { }
 	private record Section(int baseY, BlockState[] palette, long[] packed, int bits) {
+		private Section {
+			if (palette.length > 1 && packed.length != (4096 * bits + 63) / 64
+				&& packed.length != (4096 + 64 / bits - 1) / (64 / bits)) throw new IllegalArgumentException("Invalid section palette data");
+		}
 		private int paletteIndex(int x, int y, int z) {
 			if (palette.length == 0) return -1;
 			if (palette.length == 1) return 0;
 			int index = ((y & 15) << 8) | ((z & 15) << 4) | (x & 15);
-			int perLong = 64 / bits, longIndex = index / perLong;
+			int perLong = 64 / bits;
+			// Before 1.16, palette entries could straddle two longs.
+			boolean dense = packed.length == (4096 * bits + 63) / 64;
+			int bitIndex = dense ? index * bits : index / perLong * 64 + index % perLong * bits;
+			int longIndex = bitIndex / 64, shift = bitIndex % 64;
 			if (longIndex >= packed.length) return -1;
-			int paletteIndex = (int) ((packed[longIndex] >>> ((index % perLong) * bits)) & ((1L << bits) - 1));
+			long value = packed[longIndex] >>> shift;
+			if (shift + bits > 64) {
+				if (longIndex + 1 >= packed.length) return -1;
+				value |= packed[longIndex + 1] << (64 - shift);
+			}
+			int paletteIndex = (int) (value & ((1L << bits) - 1));
 			return paletteIndex < palette.length ? paletteIndex : -1;
 		}
 		private BlockState at(int x, int y, int z) {
@@ -138,7 +157,7 @@ public final class WorldMapImporter {
 				}
 			}
 		} catch (IOException exception) {
-			GrandBuilderMod.LOGGER.warn("Could not list imported worlds in {}", root, exception);
+			LOGGER.warn("Could not list imported worlds in {}", root, exception);
 		}
 	}
 
@@ -165,30 +184,70 @@ public final class WorldMapImporter {
 			}
 		});
 		List<Candidate> result = new ArrayList<>();
-		Set<Long> remaining = new HashSet<>(cells.keySet());
-		while (!remaining.isEmpty()) {
-			long seed = remaining.iterator().next();
-			remaining.remove(seed);
+		for (List<Long> group : connectedCells(cells.keySet())) addCandidates(cells, group, result, 0, false);
+		result.sort(Comparator.comparingInt(Candidate::score).reversed().thenComparing(Candidate::partial)
+			.thenComparingInt(candidate -> candidate.bounds().minX()).thenComparingInt(candidate -> candidate.bounds().minZ()));
+		return List.copyOf(result.subList(0, Math.min(MAX_CANDIDATES, result.size())));
+	}
+
+	private static List<List<Long>> connectedCells(Set<Long> keys) {
+		List<List<Long>> groups = new ArrayList<>();
+		Set<Long> remaining = new HashSet<>(keys);
+		for (long seed : keys.stream().sorted().toList()) {
+			if (!remaining.remove(seed)) continue;
 			ArrayDeque<Long> queue = new ArrayDeque<>();
 			queue.add(seed);
-			Evidence group = new Evidence();
+			List<Long> group = new ArrayList<>();
 			while (!queue.isEmpty()) {
 				long current = queue.removeFirst();
-				group.merge(cells.get(current));
+				group.add(current);
 				int gx = (int)(current >> 32), gz = (int)current;
 				for (int dz = -1; dz <= 1; dz++) for (int dx = -1; dx <= 1; dx++) {
 					long next = cellKey(gx + dx, gz + dz);
 					if (remaining.remove(next)) queue.add(next);
 				}
 			}
-			if (group.score < 24 || group.maxX - group.minX < 3 || group.maxZ - group.minZ < 3) continue;
-			Bounds bounds = new Bounds(group.minX-2,group.minY-2,group.minZ-2,
-				group.maxX+2,group.maxY+2,group.maxZ+2);
-			if (bounds.valid() && bounds.width() <= 128 && bounds.depth() <= 128 && bounds.height() <= 128)
-				result.add(new Candidate(bounds, group.score));
+			groups.add(group);
 		}
-		result.sort(Comparator.comparingInt(Candidate::score).reversed());
-		return List.copyOf(result.subList(0, Math.min(MAX_CANDIDATES, result.size())));
+		return groups;
+	}
+
+	private static void addCandidates(Map<Long, Evidence> cells, List<Long> keys, List<Candidate> result, int cut, boolean partial) {
+		Evidence group = new Evidence();
+		for (long key : keys) group.merge(cells.get(key));
+		if (group.score < 24 || group.maxX - group.minX < 3 || group.maxZ - group.minZ < 3) return;
+		Bounds raw = new Bounds(group.minX, group.minY, group.minZ, group.maxX, group.maxY, group.maxZ);
+		Bounds padded = raw.expand(2, 2);
+		if (raw.valid()) {
+			result.add(new Candidate(padded.valid() ? padded : raw, group.score, partial));
+			return;
+		}
+		// A shared road/plaza is not a reason to discard the buildings above it.
+		for (int i = cut; i < BUILDING_HEIGHT_CUTS.length; i++) {
+			Set<Long> raised = new HashSet<>();
+			for (long key : keys) {
+				Evidence cell = cells.get(key);
+				if (cell.maxY - cell.minY >= 4 && cell.maxY >= group.minY + BUILDING_HEIGHT_CUTS[i]) raised.add(key);
+			}
+			if (raised.isEmpty() || raised.size() == keys.size()) continue;
+			int before = result.size();
+			for (List<Long> building : connectedCells(raised)) addCandidates(cells, building, result, i + 1, partial);
+			if (result.size() > before) return;
+		}
+		// Oversized individual buildings remain selectable as explicitly labelled sections.
+		if (keys.size() < 2) return;
+		boolean splitX = raw.width() >= raw.depth();
+		List<Long> ordered = keys.stream().sorted(Comparator.<Long>comparingInt(key -> splitX ? (int)(key >> 32) : (int)(long)key)
+			.thenComparingLong(Long::longValue)).toList();
+		int middle = ordered.size() / 2;
+		int coordinate = splitX ? (int)(ordered.get(middle) >> 32) : (int)(long)ordered.get(middle);
+		while (middle > 0 && (splitX ? (int)(ordered.get(middle - 1) >> 32) : (int)(long)ordered.get(middle - 1)) == coordinate) middle--;
+		if (middle == 0) {
+			while (middle < ordered.size() && (splitX ? (int)(ordered.get(middle) >> 32) : (int)(long)ordered.get(middle)) == coordinate) middle++;
+		}
+		if (middle == ordered.size()) return;
+		addCandidates(cells, ordered.subList(0, middle), result, BUILDING_HEIGHT_CUTS.length, true);
+		addCandidates(cells, ordered.subList(middle, ordered.size()), result, BUILDING_HEIGHT_CUTS.length, true);
 	}
 
 	public static Loaded load(Source source, Bounds requested) throws IOException {
@@ -209,7 +268,9 @@ public final class WorldMapImporter {
 					if (!state.isAir()) blocks.put(BlockPos.asLong(x,y,z), new StoredBlock(state,null));
 				}
 			}
-			for (var blockEntity : chunk.getListOrEmpty("block_entities")) {
+			ListTag blockEntities = chunk.getListOrEmpty("block_entities");
+			if (blockEntities.isEmpty()) blockEntities = chunk.getListOrEmpty("TileEntities");
+			for (var blockEntity : blockEntities) {
 				if (!(blockEntity instanceof CompoundTag tag)) continue;
 				BlockPos pos = new BlockPos(tag.getIntOr("x",0),tag.getIntOr("y",0),tag.getIntOr("z",0));
 				StoredBlock existing = blocks.get(pos.asLong());
@@ -249,11 +310,13 @@ public final class WorldMapImporter {
 		if (!id.getNamespace().equals("minecraft")) return !name.contains("ore") && !name.contains("leaves");
 		if (name.endsWith("_ore") || name.contains("leaves") || name.contains("_log") || name.contains("_wood")) return false;
 		return name.contains("planks") || name.contains("bricks") || name.contains("glass") || name.contains("concrete")
+			|| name.equals("iron_block") || name.equals("iron_bars") || name.equals("gold_block")
+			|| name.equals("smooth_stone") || name.startsWith("smooth_sandstone") || name.equals("stone_bricks")
 			|| name.contains("wool") || name.contains("terracotta") || name.contains("quartz") || name.contains("polished")
 			|| name.contains("copper") || name.contains("prismarine") || name.contains("purpur") || name.contains("tile")
 			|| name.contains("stairs") || name.contains("slab") || name.contains("door") || name.contains("fence")
 			|| name.contains("trapdoor") || name.contains("lantern") || name.contains("chest") || name.contains("bookshelf")
-			|| name.contains("bed") || name.contains("carpet") || name.contains("crafting_table") || name.contains("furnace")
+			|| name.endsWith("_bed") || name.contains("carpet") || name.contains("crafting_table") || name.contains("furnace")
 			|| name.contains("cobblestone") || name.contains("scaffolding") || name.contains("wall") && !name.contains("deepslate");
 	}
 	private static List<Section> sections(CompoundTag root) {
@@ -267,7 +330,7 @@ public final class WorldMapImporter {
 			if (paletteTags.isEmpty()) { states=entry; paletteTags=entry.getListOrEmpty("Palette"); }
 			if (paletteTags.isEmpty()) continue;
 			BlockState[] palette = new BlockState[paletteTags.size()];
-			for (int j=0;j<palette.length;j++) palette[j]=StructureLibrary.readBlockState(paletteTags.getCompoundOrEmpty(j));
+			for (int j=0;j<palette.length;j++) palette[j]=NbtUtils.readBlockState(BuiltInRegistries.BLOCK, paletteTags.getCompoundOrEmpty(j));
 			int bits = Math.max(4, 32-Integer.numberOfLeadingZeros(Math.max(1,palette.length-1)));
 			result.add(new Section(entry.getIntOr("Y",0)*16,palette,
 				states.getLongArray("data").orElseGet(() -> entry.getLongArray("BlockStates").orElse(new long[0])),bits));
@@ -279,9 +342,10 @@ public final class WorldMapImporter {
 		int[] spawn = spawn(source);
 		regions.sort(Comparator.comparingLong(region -> (long)(region.x()-Math.floorDiv(spawn[0],512))*(region.x()-Math.floorDiv(spawn[0],512))
 			+ (long)(region.z()-Math.floorDiv(spawn[1],512))*(region.z()-Math.floorDiv(spawn[1],512))));
-		int visited = 0, regionsVisited=0;
+		int visited = 0, regionsVisited=0, readable = 0;
+		Exception failure = null;
 		for (RegionRef ref : regions) {
-			if ((filter==null && regionsVisited>=MAX_REGIONS) || visited>=MAX_CHUNKS) break;
+			if (filter==null && (regionsVisited>=MAX_REGIONS || visited>=MAX_CHUNKS)) break;
 			if (filter != null && ((ref.x()<<9)>filter.maxX() || ((ref.x()+1)<<9)-1<filter.minX()
 				|| (ref.z()<<9)>filter.maxZ() || ((ref.z()+1)<<9)-1<filter.minZ())) continue;
 			regionsVisited++;
@@ -291,7 +355,7 @@ public final class WorldMapImporter {
 					temp = Files.createTempFile("grand-builder-map-", ".mca");
 					try (ZipFile zip = new ZipFile(source.path().toFile())) {
 						ZipEntry entry = zip.getEntry(ref.zipEntry());
-						if (entry == null || entry.getSize() > MAX_REGION_BYTES) continue;
+						if (entry == null || entry.getSize() > MAX_REGION_BYTES) throw new IOException("Region file missing or too large");
 						try (InputStream input = zip.getInputStream(entry); var output = Files.newOutputStream(temp)) {
 							byte[] buffer = new byte[8192]; long bytes=0; int count;
 							while ((count=input.read(buffer))>=0) {
@@ -302,33 +366,42 @@ public final class WorldMapImporter {
 						}
 					}
 					regionPath=temp;
-				} else if (Files.size(regionPath)>MAX_REGION_BYTES) continue;
+				} else if (Files.size(regionPath)>MAX_REGION_BYTES) throw new IOException("Region file too large");
 				try (FileChannel region = FileChannel.open(regionPath,StandardOpenOption.READ)) {
 					ByteBuffer locations=ByteBuffer.allocate(4096);
 					readFully(region,locations,0);
 					locations.flip();
-					for (int z=0;z<32 && visited<MAX_CHUNKS;z++) for (int x=0;x<32 && visited<MAX_CHUNKS;x++) {
+					for (int index=0;index<1024;index++) {
+						int x=index & 31, z=index >> 5;
 						int cx=ref.x()*32+x,cz=ref.z()*32+z;
 						if (filter!=null && ((cx<<4)>filter.maxX() || ((cx+1)<<4)-1<filter.minX()
 							|| (cz<<4)>filter.maxZ() || ((cz+1)<<4)-1<filter.minZ())) continue;
 						int location=locations.getInt((x+z*32)*4);
 						if (location==0) continue;
+						if (visited>=MAX_CHUNKS) {
+							if (filter!=null) throw new IOException("Selected crop exceeds the chunk read limit");
+							break;
+						}
 						visited++;
 						try {
 							visitor.accept(readChunk(region,location,source,ref,cx,cz));
+							readable++;
 						} catch (Exception exception) {
 							if (filter!=null) throw new IOException("Could not read selected chunk "+cx+","+cz,exception);
-							GrandBuilderMod.LOGGER.debug("Skipping unreadable map chunk {},{}",cx,cz,exception);
+							failure=exception;
+							LOGGER.debug("Skipping unreadable map chunk {},{}",cx,cz,exception);
 						}
 					}
 				}
 			} catch (Exception exception) {
 				if (filter!=null) throw new IOException("Could not read selected region",exception);
-				GrandBuilderMod.LOGGER.warn("Skipping unreadable map region {}",ref.path(),exception);
+				failure=exception;
+				LOGGER.warn("Skipping unreadable map region {}",ref.path(),exception);
 			} finally {
 				if (temp!=null) Files.deleteIfExists(temp);
 			}
 		}
+		if (readable==0 && failure!=null) throw new IOException("No readable chunks in the imported map",failure);
 	}
 	private static void readFully(FileChannel file, ByteBuffer buffer, long offset) throws IOException {
 		while (buffer.hasRemaining()) {

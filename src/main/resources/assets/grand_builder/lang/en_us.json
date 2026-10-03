@@ -11,6 +11,7 @@
   "screen.grand_builder.import.no_worlds": "No Java worlds found",
   "screen.grand_builder.import.no_candidates": "No buildings found",
   "screen.grand_builder.import.candidate": "Building %s/%s · %s×%s×%s",
+  "screen.grand_builder.import.section": "Section %s/%s · %s×%s×%s",
   "screen.grand_builder.import.size": "Crop: %s × %s × %s blocks",
   "screen.grand_builder.import.view": "3D View",
   "screen.grand_builder.import.save": "Save",

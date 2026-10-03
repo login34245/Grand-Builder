@@ -48,6 +48,7 @@ public final class GrandBuilderWorldEffects {
 		STORAGE.put(RenderTypes.solidMovingBlock(), new ByteBufferBuilder(1024 * 1024));
 		STORAGE.put(RenderTypes.cutoutMovingBlock(), new ByteBufferBuilder(512 * 1024));
 		STORAGE.put(RenderTypes.translucentMovingBlock(), new ByteBufferBuilder(512 * 1024));
+		STORAGE.put(KineticBlockRenderer.inspectionLayer(), new ByteBufferBuilder(2 * 1024 * 1024));
 		buffers = MultiBufferSource.immediateWithBuffers(STORAGE, FALLBACK);
 		WorldRenderEvents.END_EXTRACTION.register(GrandBuilderWorldEffects::extract);
 		WorldRenderEvents.BEFORE_TRANSLUCENT.register(GrandBuilderWorldEffects::draw);
