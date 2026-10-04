@@ -298,6 +298,10 @@ public final class AnimatedBuildManager {
 	}
 
 	public static void adjustPreview(ServerPlayer player, BuildControlAction action) {
+		adjustPreview(player, action, false);
+	}
+
+	public static void adjustPreview(ServerPlayer player, BuildControlAction action, boolean fastMovement) {
 		if (!checkCanUse(player, true, true)) return;
 		PendingPreview preview = PENDING_PREVIEW_BY_PLAYER.get(player.getUUID());
 		if (preview == null || !preview.dimensionKey.equals(player.level().dimension())) return;
@@ -307,14 +311,15 @@ public final class AnimatedBuildManager {
 		preview.lastEditTick = now;
 		PreviewPlacement placement = new PreviewPlacement(preview.origin, preview.facing, preview.pivot);
 		Direction view = player.getDirection();
+		int step = fastMovement ? 10 : 1;
 		placement = switch (action) {
 			case ROTATE_PREVIEW -> placement.rotate();
-			case MOVE_PREVIEW_FORWARD -> placement.move(view);
-			case MOVE_PREVIEW_BACK -> placement.move(view.getOpposite());
-			case MOVE_PREVIEW_LEFT -> placement.move(view.getCounterClockWise());
-			case MOVE_PREVIEW_RIGHT -> placement.move(view.getClockWise());
-			case MOVE_PREVIEW_UP -> placement.move(Direction.UP);
-			case MOVE_PREVIEW_DOWN -> placement.move(Direction.DOWN);
+			case MOVE_PREVIEW_FORWARD -> placement.move(view, step);
+			case MOVE_PREVIEW_BACK -> placement.move(view.getOpposite(), step);
+			case MOVE_PREVIEW_LEFT -> placement.move(view.getCounterClockWise(), step);
+			case MOVE_PREVIEW_RIGHT -> placement.move(view.getClockWise(), step);
+			case MOVE_PREVIEW_UP -> placement.move(Direction.UP, step);
+			case MOVE_PREVIEW_DOWN -> placement.move(Direction.DOWN, step);
 			default -> placement;
 		};
 		GrandBuilderConfig config = GrandBuilderConfig.get();

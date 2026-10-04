@@ -53,6 +53,10 @@ public class GrandBuilderModClient implements ClientModInitializer {
 		GLFW.GLFW_KEY_X,
 		GRAND_BUILDER_CATEGORY
 	));
+	private static final KeyMapping FAST_PREVIEW_KEY = KeyBindingHelper.registerKeyBinding(new KeyMapping(
+		"key.grand_builder.fast_preview_movement", InputConstants.Type.KEYSYM,
+		GLFW.GLFW_KEY_LEFT_SHIFT, GRAND_BUILDER_CATEGORY
+	));
 
 	private static boolean hintShown;
 	private static final PreviewKey[] PREVIEW_KEYS = {
@@ -82,8 +86,14 @@ public class GrandBuilderModClient implements ClientModInitializer {
 			if (!active) { heldTicks = 0; return; }
 			heldTicks = key.isDown() ? heldTicks + 1 : 0;
 			if (clicked || repeat && heldTicks > 8 && heldTicks % 4 == 0)
-				ClientPlayNetworking.send(new BuildControlPayload(action.networkId()));
+				ClientPlayNetworking.send(new BuildControlPayload(action.networkId(), repeat && FAST_PREVIEW_KEY.isDown()));
 		}
+	}
+
+	public static Component fastPreviewKeyName() { return FAST_PREVIEW_KEY.getTranslatedKeyMessage(); }
+	public static Component previewKeyName(BuildControlAction action) {
+		for (PreviewKey binding : PREVIEW_KEYS) if (binding.action == action) return binding.key.getTranslatedKeyMessage();
+		return Component.empty();
 	}
 
 	@Override
@@ -124,8 +134,9 @@ public class GrandBuilderModClient implements ClientModInitializer {
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
 			GrandBuilderClientEffects.tick(client);
 			StructurePreviewClientState.tick(client);
-			for (PreviewKey key : PREVIEW_KEYS) key.tick(client.player != null && client.screen == null && PreviewConfirmState.isAwaitingConfirm());
+			while (FAST_PREVIEW_KEY.consumeClick()) { }
 			if (client.player == null) {
+				for (PreviewKey key : PREVIEW_KEYS) key.tick(false);
 				PreviewConfirmState.disarm();
 				WorldImportClientState.clear();
 				return;
@@ -139,6 +150,7 @@ public class GrandBuilderModClient implements ClientModInitializer {
 			if (!holdingCore) {
 				PreviewConfirmState.disarm();
 			}
+			for (PreviewKey key : PREVIEW_KEYS) key.tick(holdingCore && client.screen == null && PreviewConfirmState.isAwaitingConfirm());
 
 			if (!hintShown && holdingConsoleTool && client.screen == null) {
 				client.player.displayClientMessage(Component.translatable("message.grand_builder.client_hint"), true);

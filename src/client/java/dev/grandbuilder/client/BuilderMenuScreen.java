@@ -73,6 +73,8 @@ public class BuilderMenuScreen extends Screen {
 	private Button rollbackButton;
 	private Button cancelPreviewButton;
 	private Button youtubeButton;
+	private CycleButton<Boolean> tipsButton;
+	private boolean checkedAutomaticTip;
 	private boolean terrainEnabled = true;
 	private int statusPollCooldown = 0;
 	private int knownStructureListRevision = -1;
@@ -227,6 +229,13 @@ public class BuilderMenuScreen extends Screen {
 			Component.translatable("screen.grand_builder.youtube.badge"),
 			button -> openYoutubeChannel()
 		).bounds(youtubeBadgeLeft, youtubeBadgeTop, YOUTUBE_BADGE_SIZE, YOUTUBE_BADGE_SIZE).build());
+		this.tipsButton = this.addRenderableWidget(CycleButton.booleanBuilder(
+			Component.translatable("screen.grand_builder.tips.on"), Component.translatable("screen.grand_builder.tips.off"),
+			BuilderTipPreferences.get().enabled()).displayOnlyValue()
+			.withTooltip(value -> Tooltip.create(Component.translatable("screen.grand_builder.tips.tooltip")))
+			.create(layout.innerRight() - YOUTUBE_BADGE_SIZE - 84, layout.etaY() - 2, 80, 14,
+				Component.translatable("screen.grand_builder.tips.title"),
+				(button, enabled) -> BuilderTipPreferences.get().setEnabled(enabled)));
 		updateEffectDependentControls();
 
 		sendControl(BuildControlAction.STATUS_SILENT);
@@ -571,6 +580,11 @@ public class BuilderMenuScreen extends Screen {
 	@Override
 	public void tick() {
 		super.tick();
+		if (!checkedAutomaticTip) {
+			checkedAutomaticTip = true;
+			int tip = BuilderTipPreferences.get().takeAutomaticTip(System.currentTimeMillis());
+			if (tip >= 0) { minecraft.setScreen(new BuilderTipScreen(this, tip)); return; }
+		}
 		syncStructureChoicesFromServer();
 		syncSpeedFromServer();
 		YoutubeChannelFeed.requestRefreshIfNeeded();
@@ -845,7 +859,7 @@ public class BuilderMenuScreen extends Screen {
 			line = Component.translatable("screen.grand_builder.eta_unavailable");
 			color = 0xFFB9D8F6;
 		} else line = Component.translatable("screen.grand_builder.eta_estimate", formatEtaTicks(estimate.etaTicks()));
-		drawFittedString(graphics,line,layout.innerLeft()+2,layout.etaY(),layout.contentWidth()-24,color);
+		drawFittedString(graphics,line,layout.innerLeft()+2,layout.etaY(),layout.contentWidth()-108,color);
 	}
 
 	private void renderLiveStatus(GuiGraphics guiGraphics, UiLayout layout) {

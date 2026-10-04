@@ -10,6 +10,9 @@ public record PreviewPlacement(BlockPos origin, Direction facing, BlockPos pivot
 			facing.getClockWise(), pivot);
 	}
 	public PreviewPlacement move(Direction direction) {
-		return new PreviewPlacement(origin.relative(direction), facing, pivot.relative(direction));
+		return move(direction, 1);
+	}
+	public PreviewPlacement move(Direction direction, int distance) {
+		return new PreviewPlacement(origin.relative(direction, distance), facing, pivot.relative(direction, distance));
 	}
 }

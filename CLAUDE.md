@@ -78,13 +78,23 @@ This file is a handoff for future AI agents working on this repository, includin
 
 ## Editable Preview Controls
 
-- The user withdrew the request to change vertical movement after learning that Page Up/Page Down already exist. Do not change those bindings or add the proposed Shift+arrow aliases as part of the block-replacement update.
+- The user withdrew the earlier request to change vertical movement after learning that Page Up/Page Down already exist. Keep those bindings; the later October 4 request explicitly authorizes a separate Shift modifier for 10-block movement, not new vertical aliases.
 
 - Hold the Builder Core and create a preview. Default bindings: `R` rotates clockwise by 90 degrees; arrow keys move by one block relative to the player's horizontal viewing direction; `Page Up` / `Page Down` raise/lower it. All seven bindings are registered with Minecraft's normal Controls menu in the Grand Builder category.
 - Rotation uses a persistent integer grid pivot. Four rotations return to the exact original origin; translating moves the pivot too. Confirmation builds at the edited origin/orientation, not the original selection.
 - Movement repeats after eight held ticks, then every four ticks. Rotation is one action per press. Controls are inactive while a chat/menu is open or no preview is pending; queued inactive clicks are discarded.
 - The server checks ownership, held core, dimension, world height, and configured preview radius. Confirmation revalidates the adjusted bounds. Invalid changes leave the previous preview intact and send a localized message.
 - Allow up to three distinct preview actions per server tick, with no duplicate action that tick. Do not reintroduce a global two-tick cooldown: it discards legitimate rapid rotation/movement and diagonal inputs.
+
+### Fast Movement and Builder Tips (2026-10-04)
+
+- Hold the new `key.grand_builder.fast_preview_movement` binding (Left Shift by default) with any of the six preview movement bindings to move 10 blocks. Release it for the original 1-block step. The modifier and movement keys are independently rebindable in Minecraft Controls. Rotation remains one 90-degree turn per press. Repeat timing, build speeds and experimental modes are unchanged.
+- BuildControlPayload now carries a boolean fastMovement, with the existing one-argument constructor defaulting to false. Upgrade client and server together. The server derives only a 1/10-block distance, checks the whole destination atomically under the existing ownership/core/dimension/height/radius guards, and retains the three-distinct-actions-per-tick limit. Do not send ten separate movement packets; duplicate-action throttling would discard them. Origin and integer rotation pivot move together.
+- BuilderMenuScreen checks for an automatic Tip of the Day once per screen instance, on its first tick. Reinitialization, resizing and closing the tip dialog back to its parent must not show it again. Only a later console opening can show the next automatic tip; an open console never spawns a timed popup.
+- Nine EN/RU tips cycle without immediate repeats. Movement/rotation tips use the actual translated key bindings, not hardcoded key names. The console header has a direct `Tips: ON/OFF` native CycleButton; the dialog also has a Show tips checkbox and manual Next Tip/Done controls. Re-enabling does not bypass the cooldown.
+- Client-only preferences are in `config/grand_builder_client.json`: showTips, lastShownAtMillis, nextTip. The real-time 15-minute cooldown and opt-out persist across restarts and worlds. Atomic replacement avoids partial JSON writes; corrupt/missing data falls back to defaults. A backwards system-clock change cannot bypass the saved cooldown. Manual Next Tip changes the saved sequence without altering the automatic cooldown.
+- `verifyBuilderControls` is part of `check`: all-axis 1/10-block movement/pivot reversibility, C2S codec and stable action IDs, EN/RU key parity, exact cooldown boundary, restart persistence, opt-out/re-enable, manual cycling, atomic temporary-file cleanup and malformed-settings recovery.
+- Isolated integrated-game QA passes native network movement with Left Shift, release-to-1-block behavior, vertical steps, and independent modifier/movement rebinding. It also exercises the popup, all nine tips, dialog opt-out, direct console re-enable, repeated openings, resize and EN/RU GUI scales 2/3 with widget bounds/text/overlap checks. QA harness/log: ignored `build/qa-src/dev/grandbuilder/qa/QaBuilderControls.java` and `build/qa-controls-game.log`. Screenshots: `run/screenshots/qa-builder-tip-en.png`, `qa-builder-tip-ru.png`, `qa-builder-menu-en.png`. User maps were not opened or edited; only the existing isolated GrandBuilder QA world was used. Remote multiplayer and the full modpack remain untested.
 
 ## Kinetic Construction Modes
 
@@ -128,6 +138,7 @@ $env:JAVA_HOME = 'C:\Program Files\Eclipse Adoptium\jdk-21.0.8.9-hotspot'
 .\gradlew.bat compileJava compileClientJava
 .\gradlew.bat verifyEffectGeometry
 .\gradlew.bat verifyWorldImport
+.\gradlew.bat verifyBuilderControls
 .\gradlew.bat build
 ```
 
@@ -161,7 +172,8 @@ Copy-Item -LiteralPath $jar -Destination (Join-Path $modsDir 'grand_builder-1.1.
 - September 2026 delivery: the new 3D-effects jar was built, copied to both requested local folders, and source changes were pushed to `main`. The GitHub `v1.1.0` release asset was not replaced because release-publishing access was unavailable; do not assume that asset matches the current sources.
 - Earlier 2026-10-01 delivery added Java world-folder/ZIP import, six editable crop edges, saving into the structure library, and textured orbitable inspection for imported and ordinary structures. Its jar hash was `FC8EF7295792C116F6236914C7204822981A83158D9086225C7BADA07AF7FD96`; it is no longer the current artifact.
 - The 2026-10-01 keep/replace delivery had SHA256 `155AD37DBF1F4EFB846D7B49881EE718F4A3DF5B8ECA333FE5D21D026658A4FE`; it is no longer current. Its build and headless checks passed without launching Minecraft.
-- Latest delivery (2026-10-03) fixes WTC detection and large textured inspection. Current jar SHA256: `C60FC19002473D2BAA2F77B1EBB36100A7E11488AEACE362033DE86E7D8E4580`. Build, headless import/geometry/camera checks and isolated WTC game QA pass. Copy to Downloads, the original C-drive mods folder, and the active G-drive modpack. The GitHub release asset limitation above still applies; older delivery hashes are not current.
+- Previous delivery (2026-10-03) fixed WTC detection and large textured inspection. Its jar SHA256 was `C60FC19002473D2BAA2F77B1EBB36100A7E11488AEACE362033DE86E7D8E4580`; it is no longer current. Build, headless import/geometry/camera checks and isolated WTC game QA passed.
+- Latest delivery (2026-10-04) adds rebindable Shift-modified 10-block preview steps and opt-out builder tips with a persisted 15-minute cooldown. Current jar SHA256: `075309DD26D53EC305225EA58F6902AE5389F0F11B68389A9C23F585C0388341`. Build, all three headless verification tasks and isolated controls/UI game QA pass. Copy to Downloads, the original C-drive mods folder, and the active G-drive modpack. The GitHub release asset limitation above still applies; older delivery hashes are not current.
 
 - If committing, keep commits focused and do not revert unrelated user changes.
 - The user has been using tag/release `v1.1.0`; previous updates force-moved this tag and replaced the release asset.

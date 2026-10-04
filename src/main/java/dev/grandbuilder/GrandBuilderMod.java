@@ -168,7 +168,7 @@ public class GrandBuilderMod implements ModInitializer {
 				case TOGGLE_TERRAIN -> AnimatedBuildManager.toggleTerrainAdaptation(context.player());
 				case REQUEST_STRUCTURE_LIST -> sendStructureList(context.player());
 				case ROTATE_PREVIEW, MOVE_PREVIEW_FORWARD, MOVE_PREVIEW_BACK, MOVE_PREVIEW_LEFT,
-					MOVE_PREVIEW_RIGHT, MOVE_PREVIEW_UP, MOVE_PREVIEW_DOWN -> AnimatedBuildManager.adjustPreview(context.player(), action);
+					MOVE_PREVIEW_RIGHT, MOVE_PREVIEW_UP, MOVE_PREVIEW_DOWN -> AnimatedBuildManager.adjustPreview(context.player(), action, payload.fastMovement());
 			}
 		}));
 
