@@ -4,6 +4,8 @@ import com.google.gson.JsonParser;
 import dev.grandbuilder.network.BuildControlAction;
 import dev.grandbuilder.network.BuildControlPayload;
 import dev.grandbuilder.build.PreviewPlacement;
+import dev.grandbuilder.build.SiteClearVolume;
+import dev.grandbuilder.build.SiteClearTask;
 import io.netty.buffer.Unpooled;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -20,6 +22,9 @@ public final class BuilderControlsTest {
 		SharedConstants.tryDetectVersion();
 		Bootstrap.bootStrap();
 		verifyMovement();
+		verifyShortPresses();
+		verifyClearVolume();
+		verifyClearTask();
 		verifyCodec();
 		verifyTranslations();
 		Path temporary = Files.createTempDirectory("grand-builder-tips-test-");
@@ -29,7 +34,73 @@ public final class BuilderControlsTest {
 				for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) Files.delete(path);
 			}
 		}
-		System.out.println("Builder controls verified: 1/10-block moves, network codec, persisted 15-minute cooldown, opt-out and EN/RU tips.");
+		System.out.println("Builder controls verified: short/rebound presses, bounded clearing/undo, 1/10-block moves, network codec, persisted 15-minute cooldown, opt-out and EN/RU tips.");
+	}
+
+	private static void verifyShortPresses() {
+		var binding = new net.minecraft.client.KeyMapping("qa.grand_builder.vertical", org.lwjgl.glfw.GLFW.GLFW_KEY_PAGE_UP,
+			net.minecraft.client.KeyMapping.Category.MISC);
+		check(binding.matches(new net.minecraft.client.input.KeyEvent(org.lwjgl.glfw.GLFW.GLFW_KEY_PAGE_UP,0,0)),"Default vertical key does not match");
+		binding.setKey(com.mojang.blaze3d.platform.InputConstants.Type.KEYSYM.getOrCreate(org.lwjgl.glfw.GLFW.GLFW_KEY_K));
+		check(binding.matches(new net.minecraft.client.input.KeyEvent(org.lwjgl.glfw.GLFW.GLFW_KEY_K,0,1))
+			&& !binding.matches(new net.minecraft.client.input.KeyEvent(org.lwjgl.glfw.GLFW.GLFW_KEY_PAGE_UP,0,0)),"Rebound preview key or modifier was ignored");
+		PreviewKeyState state = new PreviewKeyState();
+		state.press();
+		check(state.tick(true, false, false, true), "Press/release between ticks was lost");
+		check(!state.tick(true, false, false, true), "Short press repeated");
+		state.press();
+		check(state.tick(true, true, true, true), "Press with vanilla click was lost");
+		for (int tick=2; tick<=16; tick++)
+			check(state.tick(true,true,false,true)==(tick==12 || tick==16), "Repeat or initial press doubled");
+		state.tick(true,false,false,true);
+		check(state.tick(true,true,false,true), "Rising edge without click was lost");
+		state.press();
+		check(!state.tick(false,true,true,true), "Inactive preview sent a movement");
+		check(!state.tick(true,false,false,true), "Press leaked out of a menu");
+	}
+	private static void verifyClearVolume() {
+		SiteClearVolume volume = new SiteClearVolume(new BlockPos(-2,64,7), new BlockPos(3,67,9));
+		var positions = new java.util.HashSet<BlockPos>();
+		for (long i=0; i<volume.size(); i++) {
+			BlockPos p=volume.position(i);
+			check(p.getX()>=-2 && p.getX()<=3 && p.getY()>=64 && p.getY()<=67 && p.getZ()>=7 && p.getZ()<=9, "Clear left its bounds");
+			check(positions.add(p), "Clear revisited a cell");
+			if (i>0) check(p.getY()<=volume.position(i-1).getY(), "Clear must run top-down");
+		}
+		check(positions.size()==72, "Clear missed empty/non-schematic positions");
+		check(volume.estimateTicks(4097)==2 && volume.estimateTicks(0)==0, "Clear ETA is incorrect");
+		SiteClearVolume huge=new SiteClearVolume(BlockPos.ZERO,new BlockPos(10000,319,10000));
+		check(huge.size()>Integer.MAX_VALUE && huge.position(huge.size()-1).equals(new BlockPos(10000,0,10000)), "Clear cursor overflowed");
+	}
+
+	private static void verifyClearTask() {
+		SiteClearVolume volume=new SiteClearVolume(BlockPos.ZERO,new BlockPos(3,2,3));
+		var world=new java.util.HashMap<BlockPos,String>();
+		var undo=new java.util.HashMap<BlockPos,String>();
+		for (long i=0;i<volume.size();i++) if (i%3==0) world.put(volume.position(i),i%2==0?"water":"chest:diamonds=7");
+		BlockPos outside=new BlockPos(4,1,2);world.put(outside,"untouched");
+		var original=new java.util.HashMap<>(world);
+		SiteClearTask task=new SiteClearTask(volume);
+		var inspect=(java.util.function.Function<BlockPos,SiteClearTask.Cell>)pos -> world.containsKey(pos)?SiteClearTask.Cell.OCCUPIED:SiteClearTask.Cell.EMPTY;
+		var remove=(java.util.function.Predicate<BlockPos>)pos -> {undo.putIfAbsent(pos,world.get(pos));world.remove(pos);return true;};
+		check(task.step(1,100,Long.MAX_VALUE,inspect,remove)==SiteClearTask.Status.WORKING && world.equals(original),"Preflight changed the world");
+		check(task.step(1,100,Long.MAX_VALUE,pos -> SiteClearTask.Cell.UNLOADED,remove)==SiteClearTask.Status.WAITING && world.equals(original),"Unloaded chunks were modified");
+		int ticks=0;
+		while (!task.done()) {
+			int before=world.size();task.step(1,100,Long.MAX_VALUE,inspect,remove);
+			check(before-world.size()<=1,"Clear exceeded the mutation budget");
+			check(++ticks<100,"Clear did not finish");
+		}
+		check(world.size()==1 && "untouched".equals(world.get(outside)),"Clear crossed the boundary or missed cells");
+		check(task.estimateTicks()==0,"Completed clear still has an ETA");
+		world.putAll(undo);check(world.equals(original),"Undo lost blocks or container contents");
+		SiteClearTask tooLarge=new SiteClearTask(volume);
+		check(tooLarge.step(512,2,Long.MAX_VALUE,inspect,remove)==SiteClearTask.Status.LIMIT && world.equals(original),"Oversized clear deleted blocks before refusal");
+		check(tooLarge.step(512,100,Long.MAX_VALUE,inspect,remove)==SiteClearTask.Status.LIMIT,"Refused clear could resume destructively");
+		SiteClearTask empty=new SiteClearTask(new SiteClearVolume(BlockPos.ZERO,new BlockPos(99,19,99)));
+		long scans=empty.remainingScans();
+		empty.step(512,100,Long.MAX_VALUE,pos->SiteClearTask.Cell.EMPTY,pos->{throw new AssertionError("Air must not create snapshots");});
+		check(scans-empty.remainingScans()==4096,"Clear scans are not bounded per tick");
 	}
 
 	private static void verifyMovement() {

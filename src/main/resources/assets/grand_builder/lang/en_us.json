@@ -1,4 +1,9 @@
 {
+  "effect.grand_builder.orbital_strike": "Orbital Strike",
+  "screen.grand_builder.blocks_clear": "Blocks: clear site",
+  "screen.grand_builder.blocks_clear_tooltip": "Remove every block and fluid inside the preview bounds before building, including gaps not stored in the schematic. Containers are backed up for Undo. Terrain adaptation is disabled.",
+  "screen.grand_builder.live_mode_clearing": "Mode: clearing site",
+  "message.grand_builder.clear_limit": "Clearing paused: this area is too large to back up safely. Undo any cleared blocks, then reduce the bounds or choose Replace.",
   "message.grand_builder.structure_load_failed": "Could not load %s: the file is invalid or exceeds the safe memory budget. See latest.log.",
   "key.grand_builder.fast_preview_movement": "Preview Movement: Hold for 10-Block Steps",
   "screen.grand_builder.tips.title": "Tip of the Day",

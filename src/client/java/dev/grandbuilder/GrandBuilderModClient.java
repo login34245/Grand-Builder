@@ -6,6 +6,7 @@ import dev.grandbuilder.client.BuildStatusClientState;
 import dev.grandbuilder.client.GrandBuilderClientEffects;
 import dev.grandbuilder.client.GrandBuilderWorldEffects;
 import dev.grandbuilder.client.PreviewConfirmState;
+import dev.grandbuilder.client.PreviewKeyState;
 import dev.grandbuilder.client.StructureListClientState;
 import dev.grandbuilder.client.StructurePreviewClientState;
 import dev.grandbuilder.client.WorldImportClientState;
@@ -73,7 +74,7 @@ public class GrandBuilderModClient implements ClientModInitializer {
 		private final KeyMapping key;
 		private final BuildControlAction action;
 		private final boolean repeat;
-		private int heldTicks;
+		private final PreviewKeyState state = new PreviewKeyState();
 		private PreviewKey(String name, int code, BuildControlAction action, boolean repeat) {
 			this.key = KeyBindingHelper.registerKeyBinding(new KeyMapping("key.grand_builder." + name,
 				InputConstants.Type.KEYSYM, code, GRAND_BUILDER_CATEGORY));
@@ -83,14 +84,15 @@ public class GrandBuilderModClient implements ClientModInitializer {
 		private void tick(boolean active) {
 			boolean clicked = false;
 			while (key.consumeClick()) clicked = true;
-			if (!active) { heldTicks = 0; return; }
-			heldTicks = key.isDown() ? heldTicks + 1 : 0;
-			if (clicked || repeat && heldTicks > 8 && heldTicks % 4 == 0)
+			if (state.tick(active, key.isDown(), clicked, repeat))
 				ClientPlayNetworking.send(new BuildControlPayload(action.networkId(), repeat && FAST_PREVIEW_KEY.isDown()));
 		}
 	}
 
 	public static Component fastPreviewKeyName() { return FAST_PREVIEW_KEY.getTranslatedKeyMessage(); }
+	public static void recordPreviewPress(net.minecraft.client.input.KeyEvent event) {
+		for (PreviewKey binding : PREVIEW_KEYS) if (binding.key.matches(event)) binding.state.press();
+	}
 	public static Component previewKeyName(BuildControlAction action) {
 		for (PreviewKey binding : PREVIEW_KEYS) if (binding.action == action) return binding.key.getTranslatedKeyMessage();
 		return Component.empty();

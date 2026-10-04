@@ -15,7 +15,8 @@ public enum BuildEffectMode {
 	FLYING_BLOCKS("flying_blocks", false, 0),
 	REVERSE_COLLAPSE("reverse_collapse", false, 0),
 	ASSEMBLY_WORKSHOP("assembly_workshop", false, 0),
-	SCALE_MODEL("scale_model", false, 0);
+	SCALE_MODEL("scale_model", false, 0),
+	ORBITAL_STRIKE("orbital_strike", true, 92);
 
 	private final String key;
 	private final boolean instantReveal;

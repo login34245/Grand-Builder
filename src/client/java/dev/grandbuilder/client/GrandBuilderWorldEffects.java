@@ -48,7 +48,6 @@ public final class GrandBuilderWorldEffects {
 		STORAGE.put(RenderTypes.solidMovingBlock(), new ByteBufferBuilder(1024 * 1024));
 		STORAGE.put(RenderTypes.cutoutMovingBlock(), new ByteBufferBuilder(512 * 1024));
 		STORAGE.put(RenderTypes.translucentMovingBlock(), new ByteBufferBuilder(512 * 1024));
-		STORAGE.put(KineticBlockRenderer.inspectionLayer(), new ByteBufferBuilder(2 * 1024 * 1024));
 		buffers = MultiBufferSource.immediateWithBuffers(STORAGE, FALLBACK);
 		WorldRenderEvents.END_EXTRACTION.register(GrandBuilderWorldEffects::extract);
 		WorldRenderEvents.BEFORE_TRANSLUCENT.register(GrandBuilderWorldEffects::draw);
@@ -130,7 +129,18 @@ public final class GrandBuilderWorldEffects {
 		if (previews != null && !previews.isEmpty()) {
 			matrices.pushPose();
 			matrices.translate(-camera.x, -camera.y, -camera.z);
-			for (StructurePreviewPayload preview : previews) EffectGeometry.emitPreviewBounds(preview, sink);
+			for (StructurePreviewPayload preview : previews) {
+				matrices.pushPose();
+				if (net.minecraft.client.Minecraft.getInstance().screen instanceof PreviewOrbit.View) {
+					double scale = PreviewOrbit.modelScale(preview);
+					Vec3 anchor = Vec3.atLowerCornerOf(preview.min());
+					matrices.translate(anchor.x, anchor.y, anchor.z);
+					matrices.scale((float) scale, (float) scale, (float) scale);
+					matrices.translate(-anchor.x, -anchor.y, -anchor.z);
+				}
+				EffectGeometry.emitPreviewBounds(preview, sink);
+				matrices.popPose();
+			}
 			matrices.popPose();
 		}
 		buffers.endBatch(SOLID);

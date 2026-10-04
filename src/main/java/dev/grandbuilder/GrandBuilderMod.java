@@ -141,7 +141,7 @@ public class GrandBuilderMod implements ModInitializer {
 				BuildEffectMode.byNetworkId(payload.effectModeId())
 			);
 			AnimatedBuildManager.setOptions(context.player().getUUID(), new BuildOptions(BuildStartSide.byId(payload.orderId()),
-				DismantleStyle.byId(payload.dismantleStyleId()), payload.destructiveExplosion(), payload.replaceExistingBlocks()));
+				DismantleStyle.byId(payload.dismantleStyleId()), payload.destructiveExplosion(), payload.placementPolicy()));
 			AnimatedBuildManager.preparePreview(context.player());
 		}));
 		ServerPlayNetworking.registerGlobalReceiver(BuildEstimateRequestPayload.TYPE, (payload, context) ->

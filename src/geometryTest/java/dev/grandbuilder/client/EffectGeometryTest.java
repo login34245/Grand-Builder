@@ -6,6 +6,8 @@ import dev.grandbuilder.build.BuildSpeed;
 import dev.grandbuilder.build.HerobrineTiming;
 import dev.grandbuilder.build.BuildStartSide;
 import dev.grandbuilder.build.BuildOptions;
+import dev.grandbuilder.build.PlacementPolicy;
+import dev.grandbuilder.network.StructurePreviewPayload;
 import dev.grandbuilder.build.AnimatedBuildManager;
 import dev.grandbuilder.config.GrandBuilderConfig;
 import dev.grandbuilder.build.DismantleStyle;
@@ -76,6 +78,12 @@ public final class EffectGeometryTest {
 	}
 
 	private static void verifyInspectionCamera() {
+		var huge = new StructurePreviewPayload(StructurePreviewPayload.INSPECT,true,
+			net.minecraft.resources.Identifier.fromNamespaceAndPath("minecraft","overworld"),BlockPos.ZERO,new BlockPos(132,1609,118),List.of());
+		double scale=PreviewOrbit.modelScale(huge);
+		check(Math.abs(scale*1610-64)<0.0001,"Huge model is not fitted to the inspection render volume");
+		var displayedTop=PreviewOrbit.modelPosition(huge,new net.minecraft.world.phys.Vec3(133,1610,119),scale);
+		check(displayedTop.y==64 && displayedTop.x<64 && displayedTop.z<64,"Inspection transform disagrees with model bounds");
 		var center = new net.minecraft.world.phys.Vec3(0, 180, 0);
 		for (int[] screen : new int[][] {{640,360,296}, {426,240,220}, {320,180,162}, {426,240,0}, {320,180,0}}) {
 			var orbit = new PreviewOrbit();
@@ -230,6 +238,19 @@ public final class EffectGeometryTest {
 		SharedConstants.tryDetectVersion();
 		Bootstrap.bootStrap();
 		check(!BuildOptions.DEFAULT.replaceExistingBlocks(), "New builds must preserve existing blocks by default");
+		for (BuildEffectMode mode : BuildEffectMode.values()) {
+			BuildOptions options = new BuildOptions(BuildStartSide.RIGHT,DismantleStyle.HEROBRINE,true,PlacementPolicy.CLEAR_SITE).normalized(mode);
+			check(options.clearsSite() && options.replaceExistingBlocks(),"Mode change lost Clear Site");
+			var request = new BuildRequestPayload("file:test",3,mode.networkId(),2,1,true,PlacementPolicy.CLEAR_SITE.ordinal());
+			RegistryFriendlyByteBuf buffer = new RegistryFriendlyByteBuf(Unpooled.buffer(),RegistryAccess.EMPTY);
+			try {
+				BuildRequestPayload.CODEC.encode(buffer,request);
+				var decoded=BuildRequestPayload.CODEC.decode(buffer);
+				check(decoded.equals(request) && decoded.placementPolicy()==PlacementPolicy.CLEAR_SITE && !buffer.isReadable(),"Clear Site codec lost the policy");
+			} finally { buffer.release(); }
+		}
+		check(PlacementPolicy.byId(-1)==PlacementPolicy.PRESERVE && PlacementPolicy.byId(99)==PlacementPolicy.PRESERVE,"Invalid policy is destructive");
+		check(BuildEffectMode.ORBITAL_STRIKE.networkId()==15 && BuildEffectMode.ORBITAL_STRIKE.hidesSpeed(),"Orbital mode IDs or instant timing changed");
 		for (boolean replace : new boolean[] {false, true}) {
 			for (BuildEffectMode mode : BuildEffectMode.values()) {
 				BuildOptions options = new BuildOptions(BuildStartSide.RIGHT, DismantleStyle.HEROBRINE, true, replace).normalized(mode);

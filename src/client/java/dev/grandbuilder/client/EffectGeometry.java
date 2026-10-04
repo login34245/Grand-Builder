@@ -46,6 +46,7 @@ public final class EffectGeometry {
 			case CLOCKWORK_GRID -> clockwork(mesh, frame);
 			case AURORA_WEAVE -> aurora(mesh, frame);
 			case BUILDER_CHARGE -> builderCharge(mesh, frame);
+			case ORBITAL_STRIKE -> orbitalStrike(mesh, frame);
 			case REVERSE -> directional(mesh, frame);
 			case FLYING_BLOCKS, REVERSE_COLLAPSE, ASSEMBLY_WORKSHOP, SCALE_MODEL -> KineticGeometry.emit(frame, mesh);
 			default -> { }
@@ -145,6 +146,82 @@ public final class EffectGeometry {
 			}
 			m.pop();
 		}
+	}
+
+	private static void orbitalStrike(Mesh m, GrandBuilderClientEffects.Frame f) {
+		double t = f.phaseProgress();
+		double impactY = f.height() + 1.2;
+		double size = Math.clamp(f.radius() * 0.32, 2.5, 9);
+		if (!f.revealing()) {
+			double charge = ease(t / 0.76);
+			double launch = ease((t - 0.80) / 0.20);
+			double altitude = impactY + 68 * (1-launch);
+			// Three offset accelerator collars lock together before the final, fast descent.
+			for (int collar = 0; collar < 3; collar++) {
+				m.push(0, impactY + 56 + collar*6, 0);
+				m.rotate((1-charge)*(collar-1)*0.7, f.motionAge()*0.014*(collar%2==0?1:-1), (1-charge)*0.25);
+				double ringRadius=size*(1.4+collar*0.22);
+				m.lathe(new double[] {ringRadius-0.25,ringRadius+0.25,ringRadius+0.25,ringRadius-0.25,ringRadius-0.25},
+					new double[] {-0.30,-0.30,0.30,0.30,-0.30},32,0x42525C);
+				m.torus(size*(1.4+collar*0.22), 0.07, 0.25, 0xFFF1C4, charge*(1-launch)*0.8);
+				for (int tooth = 0; tooth < 8; tooth++) {
+					double angle = tooth*TAU/8;
+					m.push(Math.cos(angle)*size*(1.4+collar*0.22), 0, Math.sin(angle)*size*(1.4+collar*0.22));
+					m.rotate(0, -angle, 0);
+					m.box(0.32, 0.7, 0.42, 0x25343A, Material.SOLID, 1-launch);
+					m.box(0.34, 0.10, 0.44, 0xE4F9FF, Material.GLOW, charge*(1-launch));
+					m.pop();
+				}
+				m.pop();
+			}
+			m.push(0, altitude + size*3, 0);
+			m.rotate(0, f.motionAge()*0.027, 0);
+			m.lathe(new double[] {0, size*0.48, size*0.60, size*0.38, size*0.25, 0},
+				new double[] {-size*3, -size*1.5, size, size*2, size*2.6, size*3}, 24, 0x455A68);
+			for (int fin = 0; fin < 4; fin++) {
+				m.push(0, 0, 0);
+				m.rotate(0, fin*Math.PI/2, 0);
+				m.push(size*0.53, 0, 0);
+				m.box(size*0.035, size*1.65, size*0.10, 0xE8F5FF, Material.GLOW, charge);
+				m.pop();
+				m.pop();
+			}
+			m.pop();
+			m.tube(0, impactY, 0, 0, impactY+60, 0, 0.035+charge*0.03, 0xFFF3D2, Material.GLOW, charge*0.32);
+			if (launch > 0) {
+				m.tube(0, altitude+size*5, 0, 0, impactY+100, 0, size*0.25, 0xE3F7FF, Material.GLOW, 1-launch);
+			}
+			m.push(0, impactY, 0);
+			m.torus(size*(1.6-charge*0.5), 0.05, 0, 0xFFF1C4, charge*0.7);
+			m.pop();
+			return;
+		}
+		double pulse = 1-ease(t/0.18);
+		double spread = 1-Math.pow(1-t, 4);
+		m.push(0, impactY, 0);
+		m.sphere(size*(0.4+ease(t/0.12)*2), 0xF4FDFF, pulse*0.65);
+		m.tube(0, -f.height(), 0, 0, 85*(1-t), 0, size*(0.4+t), 0xFFF4D6, Material.GLOW, pulse*0.8);
+		for (int plane = 0; plane < 3; plane++) {
+			m.push(0, 0, 0);
+			m.rotate(plane==0?0:Math.PI/2, plane*Math.PI/3, plane==2?Math.PI/2:0);
+			m.torus((f.radius()+12)*spread*(1-plane*0.12), 0.20*(1-t)+0.02, 0,
+				plane==0?0xFFE7AA:0xB4EBFF, (1-t)*0.8);
+			m.pop();
+		}
+		m.pop();
+		blastWave(m, (f.radius()+12)*1.65, t);
+		for (int shard = 0; shard < 28; shard++) {
+			double angle = shard*2.399, distance = (f.radius()+8)*spread;
+			m.push(Math.cos(angle)*distance, impactY + Math.sin(t*Math.PI)*(8+shard%6)-t*t*5, Math.sin(angle)*distance);
+			m.rotate(shard+t*8, t*6, angle);
+			m.box(0.06+shard%3*0.02, 0.28, 0.65, 0x3B5361, Material.SOLID, 1-ease((t-0.45)/0.55));
+			m.box(0.025, 0.30, 0.66, 0xD8F7FF, Material.GLOW, (1-t)*0.6);
+			m.pop();
+		}
+		double scan = ease((t-0.06)/0.62);
+		m.push(0, f.height()*scan+0.08, 0);
+		m.rectangle(f.width()*0.5+0.2, f.depth()*0.5+0.2, 0.08, 0xFFF0C8, (1-t)*0.65);
+		m.pop();
 	}
 
 	private static void builderCharge(Mesh m, GrandBuilderClientEffects.Frame f) {

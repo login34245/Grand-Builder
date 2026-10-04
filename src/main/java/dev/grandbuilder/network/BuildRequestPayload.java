@@ -1,13 +1,20 @@
 package dev.grandbuilder.network;
 
 import dev.grandbuilder.GrandBuilderMod;
+import dev.grandbuilder.build.PlacementPolicy;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.Identifier;
 
 public record BuildRequestPayload(String structureKey, int speedId, int effectModeId, int orderId,
-	int dismantleStyleId, boolean destructiveExplosion, boolean replaceExistingBlocks) implements CustomPacketPayload {
+	int dismantleStyleId, boolean destructiveExplosion, int placementPolicyId) implements CustomPacketPayload {
+	public BuildRequestPayload(String structureKey, int speedId, int effectModeId, int orderId,
+		int dismantleStyleId, boolean destructiveExplosion, boolean replaceExistingBlocks) {
+		this(structureKey, speedId, effectModeId, orderId, dismantleStyleId, destructiveExplosion, replaceExistingBlocks ? 1 : 0);
+	}
+	public PlacementPolicy placementPolicy() { return PlacementPolicy.byId(placementPolicyId); }
+	public boolean replaceExistingBlocks() { return placementPolicy() != PlacementPolicy.PRESERVE; }
 	public BuildRequestPayload(String structureKey, int speedId, int effectModeId) {
 		this(structureKey, speedId, effectModeId, 0, 0, false, false);
 	}
@@ -20,10 +27,10 @@ public record BuildRequestPayload(String structureKey, int speedId, int effectMo
 			buffer.writeVarInt(payload.orderId());
 			buffer.writeVarInt(payload.dismantleStyleId());
 			buffer.writeBoolean(payload.destructiveExplosion());
-			buffer.writeBoolean(payload.replaceExistingBlocks());
+			buffer.writeVarInt(payload.placementPolicyId());
 		},
 		buffer -> new BuildRequestPayload(buffer.readUtf(256), buffer.readVarInt(), buffer.readVarInt(),
-			buffer.readVarInt(), buffer.readVarInt(), buffer.readBoolean(), buffer.readBoolean())
+			buffer.readVarInt(), buffer.readVarInt(), buffer.readBoolean(), buffer.readVarInt())
 	);
 
 	@Override

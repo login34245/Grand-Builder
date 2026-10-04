@@ -16,14 +16,23 @@ public final class PreviewOrbit {
 	public void drag(double dx, double dy) { yaw+=(float)dx*0.6f; pitch=Math.clamp(pitch+(float)dy*0.5f,-75,75); }
 	public void zoom(double delta) { zoom=Math.clamp(zoom*Math.exp(-delta*0.12),0.25,3); }
 	public void reset() { yaw=-135; pitch=25; zoom=1; }
+	public static double modelScale(StructurePreviewPayload model) {
+		return Math.min(1, 64.0 / Math.max(model.max().getX()-model.min().getX()+1,
+			Math.max(model.max().getY()-model.min().getY()+1, model.max().getZ()-model.min().getZ()+1)));
+	}
+	public static Vec3 modelPosition(StructurePreviewPayload model, Vec3 position, double scale) {
+		Vec3 anchor = Vec3.atLowerCornerOf(model.min());
+		return anchor.add(position.subtract(anchor).scale(scale));
+	}
 	public Pose pose(View view) {
 		StructurePreviewPayload model=StructurePreviewClientState.get(view.previewKind());
 		Minecraft client=Minecraft.getInstance();
 		if (model==null || client.screen==null) return null;
 		double w=model.max().getX()-model.min().getX()+1, h=model.max().getY()-model.min().getY()+1;
 		double d=model.max().getZ()-model.min().getZ()+1;
-		Vec3 center=new Vec3(model.min().getX()+w/2,model.min().getY()+h/2,model.min().getZ()+d/2);
-		return pose(center,w,h,d,client.screen.width,client.screen.height,view.viewportLeft(),client.options.fov().get());
+		double scale=modelScale(model);
+		Vec3 center=modelPosition(model,new Vec3(model.min().getX()+w/2,model.min().getY()+h/2,model.min().getZ()+d/2),scale);
+		return pose(center,w*scale,h*scale,d*scale,client.screen.width,client.screen.height,view.viewportLeft(),client.options.fov().get());
 	}
 	Pose pose(Vec3 center,double w,double h,double d,int screenWidth,int screenHeight,int viewportLeft,double fov) {
 		double aspect=(double)screenWidth/screenHeight;

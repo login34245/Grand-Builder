@@ -3,6 +3,7 @@ package dev.grandbuilder.client;
 import dev.grandbuilder.build.BuildSpeed;
 import dev.grandbuilder.build.BuildEffectMode;
 import dev.grandbuilder.build.BuildOptions;
+import dev.grandbuilder.build.PlacementPolicy;
 import dev.grandbuilder.build.BuildStartSide;
 import dev.grandbuilder.build.DismantleStyle;
 import dev.grandbuilder.build.CustomCaptureFormat;
@@ -50,7 +51,7 @@ public class BuilderMenuScreen extends Screen {
 	private int selectedStructureIndex;
 	private BuildSpeed selectedSpeed = lastSpeed;
 	private BuildEffectMode selectedEffectMode = lastEffectMode;
-	private BuildOptions selectedOptions = new BuildOptions(lastOptions.startSide(), lastOptions.dismantleStyle(), false, lastOptions.replaceExistingBlocks());
+	private BuildOptions selectedOptions = new BuildOptions(lastOptions.startSide(), lastOptions.dismantleStyle(), false, lastOptions.placementPolicy());
 	private BuildEstimatePayload estimate;
 	private BuildRequestPayload estimateSelection;
 	private int estimateRequestId;
@@ -63,7 +64,7 @@ public class BuilderMenuScreen extends Screen {
 	private Button importButton;
 	private Button speedButton;
 	private Button terrainButton;
-	private CycleButton<Boolean> replacementButton;
+	private CycleButton<PlacementPolicy> replacementButton;
 	private Button effectButton;
 	private Button optionsButton;
 	private Button captureFormatButton;
@@ -175,12 +176,10 @@ public class BuilderMenuScreen extends Screen {
 			setFittedMessage(this.terrainButton, terrainMessage());
 			sendControl(BuildControlAction.TOGGLE_TERRAIN);
 		}).bounds(layout.innerLeft() + layout.splitLeft() + 4, layout.speedButtonY(), layout.splitRight(), layout.buttonHeight()).build());
-		this.replacementButton = this.addRenderableWidget(CycleButton.booleanBuilder(
-			fitButtonMessage(Component.translatable("screen.grand_builder.blocks_replace"), layout.contentWidth()),
-			fitButtonMessage(Component.translatable("screen.grand_builder.blocks_keep"), layout.contentWidth()),
-			selectedOptions.replaceExistingBlocks()).displayOnlyValue()
-			.withTooltip(value -> Tooltip.create(Component.translatable(value
-				? "screen.grand_builder.blocks_replace_tooltip" : "screen.grand_builder.blocks_keep_tooltip")))
+		this.replacementButton = this.addRenderableWidget(CycleButton.<PlacementPolicy>builder(value ->
+			fitButtonMessage(Component.translatable(value.translationKey()), layout.contentWidth()), selectedOptions.placementPolicy())
+			.withValues(PlacementPolicy.values()).displayOnlyValue()
+			.withTooltip(value -> Tooltip.create(Component.translatable(value.tooltipKey())))
 			.create(layout.innerLeft(), layout.replacementButtonY(), layout.contentWidth(), layout.buttonHeight(),
 				Component.translatable("screen.grand_builder.existing_blocks"), (button, replace) -> {
 					selectedOptions = new BuildOptions(selectedOptions.startSide(), selectedOptions.dismantleStyle(),
@@ -191,15 +190,15 @@ public class BuilderMenuScreen extends Screen {
 
 		this.effectButton = this.addRenderableWidget(Button.builder(fitButtonMessage(effectMessage(), layout.contentWidth()), button -> {
 			this.selectedEffectMode = this.selectedEffectMode.next();
-			this.selectedOptions = new BuildOptions(selectedOptions.startSide(), selectedOptions.dismantleStyle(), false, selectedOptions.replaceExistingBlocks());
+			this.selectedOptions = new BuildOptions(selectedOptions.startSide(), selectedOptions.dismantleStyle(), false, selectedOptions.placementPolicy());
 			lastEffectMode = this.selectedEffectMode;
 			setFittedMessage(this.effectButton, effectMessage());
 			updateEffectDependentControls();
 		}).bounds(layout.innerLeft(), layout.effectButtonY(), layout.contentWidth(), layout.buttonHeight()).build());
 		this.optionsButton = this.addRenderableWidget(Button.builder(optionsMessage(), button -> {
-			if (selectedEffectMode == BuildEffectMode.REVERSE) selectedOptions = new BuildOptions(selectedOptions.startSide().next(), selectedOptions.dismantleStyle(), false, selectedOptions.replaceExistingBlocks());
-			else if (selectedEffectMode == BuildEffectMode.DISMANTLE) selectedOptions = new BuildOptions(selectedOptions.startSide(), selectedOptions.dismantleStyle().next(), false, selectedOptions.replaceExistingBlocks());
-			else if (selectedEffectMode == BuildEffectMode.BUILDER_CHARGE) selectedOptions = new BuildOptions(selectedOptions.startSide(), selectedOptions.dismantleStyle(), !selectedOptions.destructiveExplosion(), selectedOptions.replaceExistingBlocks()).normalized(selectedEffectMode);
+			if (selectedEffectMode == BuildEffectMode.REVERSE) selectedOptions = new BuildOptions(selectedOptions.startSide().next(), selectedOptions.dismantleStyle(), false, selectedOptions.placementPolicy());
+			else if (selectedEffectMode == BuildEffectMode.DISMANTLE) selectedOptions = new BuildOptions(selectedOptions.startSide(), selectedOptions.dismantleStyle().next(), false, selectedOptions.placementPolicy());
+			else if (selectedEffectMode == BuildEffectMode.BUILDER_CHARGE) selectedOptions = new BuildOptions(selectedOptions.startSide(), selectedOptions.dismantleStyle(), !selectedOptions.destructiveExplosion(), selectedOptions.placementPolicy()).normalized(selectedEffectMode);
 			lastOptions = selectedOptions;
 			refreshButtonMessages();
 		}).bounds(layout.innerLeft(), layout.optionsButtonY(), layout.contentWidth(), layout.buttonHeight()).build());
@@ -414,7 +413,7 @@ public class BuilderMenuScreen extends Screen {
 	private BuildRequestPayload selectionPayload() {
 		BuildOptions options = selectedOptions.normalized(selectedEffectMode);
 		return new BuildRequestPayload(currentSelection().key(), selectedSpeed.networkId(), selectedEffectMode.networkId(),
-			options.startSide().ordinal(), options.dismantleStyle().ordinal(), options.destructiveExplosion(), options.replaceExistingBlocks());
+			options.startSide().ordinal(), options.dismantleStyle().ordinal(), options.destructiveExplosion(), options.placementPolicy().ordinal());
 	}
 
 	private void sendBuildRequest() {
@@ -461,7 +460,7 @@ public class BuilderMenuScreen extends Screen {
 
 	private Component terrainMessage() {
 		return Component.translatable(
-			this.terrainEnabled
+			this.terrainEnabled && !selectedOptions.clearsSite()
 				? "screen.grand_builder.terrain_enabled"
 				: "screen.grand_builder.terrain_disabled"
 		);
@@ -533,7 +532,7 @@ public class BuilderMenuScreen extends Screen {
 		if (this.replacementButton != null) {
 			this.replacementButton.setY(layout.replacementButtonY());
 			this.replacementButton.setHeight(layout.buttonHeight());
-			this.replacementButton.setValue(selectedOptions.replaceExistingBlocks());
+			this.replacementButton.setValue(selectedOptions.placementPolicy());
 		}
 		if (this.effectButton != null) this.effectButton.setY(layout.effectButtonY());
 		if (this.captureFormatButton != null) this.captureFormatButton.setY(layout.captureButtonY());
@@ -566,7 +565,9 @@ public class BuilderMenuScreen extends Screen {
 		}
 		if (this.terrainButton != null) {
 			this.terrainButton.visible = showTerrain;
-			this.terrainButton.active = showTerrain;
+			this.terrainButton.active = showTerrain && !selectedOptions.clearsSite();
+			this.terrainButton.setTooltip(selectedOptions.clearsSite()
+				? Tooltip.create(Component.translatable("screen.grand_builder.blocks_clear_tooltip")) : null);
 			int terrainX = showSpeed ? layout.innerLeft() + layout.splitLeft() + 4 : layout.innerLeft();
 			int terrainWidth = showSpeed ? layout.splitRight() : layout.contentWidth();
 			this.terrainButton.setX(terrainX);
@@ -870,6 +871,7 @@ public class BuilderMenuScreen extends Screen {
 			: selectedEffectMode.displayRate(speed);
 
 		Component modeText = switch (snapshot.modeId()) {
+			case 4 -> Component.translatable(snapshot.paused() ? "screen.grand_builder.live_mode_paused" : "screen.grand_builder.live_mode_clearing");
 			case 1, 3 -> snapshot.paused()
 				? Component.translatable("screen.grand_builder.live_mode_paused")
 				: Component.translatable(snapshot.modeId() == 3 ? "screen.grand_builder.live_mode_dismantling" : "screen.grand_builder.live_mode_building");

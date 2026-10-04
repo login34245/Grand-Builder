@@ -114,7 +114,7 @@ public final class AnimatedBuildManager {
 		List<GrandPalaceBlueprint.RelativeBlock> blocks = structure.custom() ? CUSTOM_BLUEPRINT_BY_PLAYER.get(player.getUUID()) : structure.blueprint();
 		BuildEffectMode mode = BuildEffectMode.byNetworkId(selected.effectModeId());
 		BuildOptions options = new BuildOptions(BuildStartSide.byId(selected.orderId()),
-			DismantleStyle.byId(selected.dismantleStyleId()), selected.destructiveExplosion(), selected.replaceExistingBlocks()).normalized(mode);
+			DismantleStyle.byId(selected.dismantleStyleId()), selected.destructiveExplosion(), selected.placementPolicy()).normalized(mode);
 		boolean available = checkCanUse(player, false, false) && blocks != null && !blocks.isEmpty()
 			&& blocks.size() <= GrandBuilderConfig.get().maxBlocksPerBuild;
 		int count = 0;
@@ -124,6 +124,7 @@ public final class AnimatedBuildManager {
 			} else count = blocks.size();
 		}
 		long ticks = available ? estimateTicks(count, BuildSpeed.byNetworkId(selected.speedId()), mode, options) : 0;
+		if (available && options.clearsSite()) ticks += clearEstimate(computeBuildBounds(BlockPos.ZERO, Direction.NORTH, blocks));
 		ServerPlayNetworking.send(player, new BuildEstimatePayload(request.requestId(), count,
 			(int) Math.min(Integer.MAX_VALUE, ticks), available));
 	}
@@ -193,6 +194,7 @@ public final class AnimatedBuildManager {
 
 		BuildSpeed speed = getSpeed(player.getUUID());
 		long ticksLeft = estimateTicks(preview.estimatedBlocks, speed, preview.effectMode(), preview.options);
+		if (preview.options.clearsSite()) ticksLeft += clearEstimate(bounds);
 		player.displayClientMessage(Component.translatable(
 			"message.grand_builder.preview_ready",
 			selection.structure().displayName(),
@@ -599,7 +601,7 @@ public final class AnimatedBuildManager {
 
 			sendStatusPayload(
 				player,
-				job.effectMode == BuildEffectMode.DISMANTLE ? 3 : 1,
+				!job.clearFinished ? 4 : job.effectMode == BuildEffectMode.DISMANTLE ? 3 : 1,
 				job.structureName.getString(),
 				(float) percent,
 				remaining,
@@ -632,6 +634,7 @@ public final class AnimatedBuildManager {
 		PendingPreview preview = PENDING_PREVIEW_BY_PLAYER.get(player.getUUID());
 		if (preview != null) {
 			long ticksLeft = estimateTicks(preview.estimatedBlocks, speed, preview.effectMode(), preview.options);
+			if (preview.options.clearsSite()) ticksLeft += clearEstimate(computeBuildBounds(preview.origin, preview.facing, preview.blocks));
 			sendStatusPayload(
 				player,
 				2,
@@ -829,7 +832,7 @@ public final class AnimatedBuildManager {
 				job.finishEffects(level);
 				job.restoreClockworkTime(level);
 				job.sendScene(level, job.effectMode == BuildEffectMode.DISMANTLE ? BuildEffectPayload.PHASE_STOP : BuildEffectPayload.PHASE_REVEAL,
-					job.effectMode == BuildEffectMode.BUILDER_CHARGE ? 44 : 28, 0, revealShakeIntensity(job.effectMode));
+					job.effectMode == BuildEffectMode.ORBITAL_STRIKE ? 52 : job.effectMode == BuildEffectMode.BUILDER_CHARGE ? 44 : 28, 0, revealShakeIntensity(job.effectMode));
 				if (owner != null) {
 					owner.displayClientMessage(Component.translatable(job.effectMode == BuildEffectMode.DISMANTLE
 						? "message.grand_builder.dismantled" : "message.grand_builder.completed", job.structureName), true);
@@ -1012,7 +1015,7 @@ public final class AnimatedBuildManager {
 		GrandBuilderConfig config = GrandBuilderConfig.get();
 		List<GrandPalaceBlueprint.RelativeBlock> finalBlueprint = new ArrayList<>(blueprint);
 		int terrainBlocksAdded = 0;
-		if (effectMode != BuildEffectMode.DISMANTLE && isTerrainAdaptationEnabled(player.getUUID())) {
+		if (!options.clearsSite() && effectMode != BuildEffectMode.DISMANTLE && isTerrainAdaptationEnabled(player.getUUID())) {
 			List<GrandPalaceBlueprint.RelativeBlock> terrainBlocks = generateTerrainAdaptationBlocks(player.level(), finalBlueprint, origin, facing, config);
 			terrainBlocksAdded = terrainBlocks.size();
 			if (!terrainBlocks.isEmpty()) {
@@ -1615,6 +1618,7 @@ public final class AnimatedBuildManager {
 		BuildOptions options
 	) {
 		Map<BlockPos, SnapshotBlock> snapshot = new HashMap<>();
+		if (options.clearsSite()) return new RollbackData(dimensionKey, structureName, origin, snapshot);
 		for (GrandPalaceBlueprint.RelativeBlock block : blocks) {
 			BlockPos targetPos = transform(origin, facing, block);
 			if (!level.isInWorldBounds(targetPos) || !level.isLoaded(targetPos)) {
@@ -1662,6 +1666,11 @@ public final class AnimatedBuildManager {
 		long minutes = seconds / 60L;
 		long sec = seconds % 60L;
 		return String.format(Locale.US, "%02d:%02d", minutes, sec);
+	}
+
+	private static long clearEstimate(BuildBounds bounds) {
+		long volume = (long) (bounds.maxX()-bounds.minX()+1) * (bounds.maxY()-bounds.minY()+1) * (bounds.maxZ()-bounds.minZ()+1);
+		return (volume * 2 + 4095) / 4096;
 	}
 
 	private static long estimateTicks(int remainingBlocks, BuildSpeed speed) {
@@ -1727,6 +1736,7 @@ public final class AnimatedBuildManager {
 
 	private static float arrivalShakeIntensity(BuildEffectMode effectMode) {
 		return switch (effectMode) {
+			case ORBITAL_STRIKE -> 0.75f;
 			case METEOR_FORGE -> 1.30f;
 			case RIFT_BLOOM -> 1.12f;
 			default -> 1.05f;
@@ -1735,6 +1745,7 @@ public final class AnimatedBuildManager {
 
 	private static float revealShakeIntensity(BuildEffectMode effectMode) {
 		return switch (effectMode) {
+			case ORBITAL_STRIKE -> 2.4f;
 			case HEROBRINE -> 0.0f;
 			case BUILDER_CHARGE -> 2.05f;
 			case METEOR_FORGE -> 2.05f;
@@ -2166,6 +2177,8 @@ public final class AnimatedBuildManager {
 		private final BuildEffectMode effectMode;
 		private final BuildBounds effectBounds;
 		private final BuildOptions options;
+		private final SiteClearTask clearTask;
+		private boolean clearFinished;
 		private int totalBlocks;
 		private int dryCursor;
 		private int fluidCursor;
@@ -2232,6 +2245,9 @@ public final class AnimatedBuildManager {
 			this.effectMode = effectMode;
 			this.options = options.normalized(effectMode);
 			this.effectBounds = effectBounds;
+			this.clearTask = new SiteClearTask(new SiteClearVolume(new BlockPos(effectBounds.minX(), effectBounds.minY(), effectBounds.minZ()),
+				new BlockPos(effectBounds.maxX(), effectBounds.maxY(), effectBounds.maxZ())));
+			this.clearFinished = !this.options.clearsSite();
 			if (effectMode == BuildEffectMode.REVERSE) {
 				this.dryBlocks.sort(this.options.startSide().comparator());
 				this.fluidBlocks.sort(this.options.startSide().comparator());
@@ -2246,7 +2262,7 @@ public final class AnimatedBuildManager {
 			int duration = arriving ? visual.revealDelayTicks()
 				: effectMode == BuildEffectMode.CLOCKWORK_GRID ? CLOCKWORK_BUILD_DURATION_TICKS
 				: (int) Math.min(Integer.MAX_VALUE, estimateTicks(totalBlocks, getSpeed(ownerId), visual == BuildEffectMode.BUILDER_CHARGE ? BuildEffectMode.STANDARD : visual));
-			int phase = isPaused || effectMode == BuildEffectMode.DISMANTLE && (!dismantlePrepared || dismantleHoldTicks > 0)
+			int phase = isPaused || !clearFinished || effectMode == BuildEffectMode.DISMANTLE && (!dismantlePrepared || dismantleHoldTicks > 0)
 				? BuildEffectPayload.PHASE_PAUSED : arriving ? BuildEffectPayload.PHASE_ARRIVAL : BuildEffectPayload.PHASE_BUILD;
 			sendScene(level, phase, duration, dismantleDetonated ? Math.max(0, effectTick - 72) : effectTick,
 				dismantleDetonated ? revealShakeIntensity(visual) : arrivalShakeIntensity(visual));
@@ -2340,6 +2356,7 @@ public final class AnimatedBuildManager {
 				waitingForChunks = false;
 				return false;
 			}
+			if (!clearFinished) { tickClearSite(level, owner, config); return false; }
 			if (effectMode.kinetic() && effectTick < effectMode.setupTicks()) {
 				if (!kineticChunksReady(level, config)) { waitingForChunks = true; return false; }
 				waitingForChunks = false;
@@ -2388,6 +2405,35 @@ public final class AnimatedBuildManager {
 			if (effectMode.kinetic()) sendKinetic(level);
 			boolean finished = dryCursor >= dryBlocks.size() && fluidCursor >= fluidBlocks.size();
 			return finished && (effectMode != BuildEffectMode.DISMANTLE || restoreDismantleCleanup(level));
+		}
+
+		private void tickClearSite(ServerLevel level, ServerPlayer owner, GrandBuilderConfig config) {
+			waitingForChunks = false;
+			int snapshotLimit = (int) Math.min(config.maxBlocksPerBuild, Math.max(32768, Runtime.getRuntime().maxMemory() / 32 / 256));
+			SiteClearTask.Status status = clearTask.step(Math.min(512, config.maxBlocksPerTick), snapshotLimit,
+				System.nanoTime()+4_000_000, pos -> {
+					if (!level.isInWorldBounds(pos) || !level.getWorldBorder().isWithinBounds(pos)) return SiteClearTask.Cell.OUTSIDE;
+					if (!level.isLoaded(pos)) return SiteClearTask.Cell.UNLOADED;
+					return level.getBlockState(pos).isAir() ? SiteClearTask.Cell.EMPTY : SiteClearTask.Cell.OCCUPIED;
+				}, pos -> {
+					if (!rollbackData.snapshot().containsKey(pos)) {
+						if (rollbackData.snapshot().size() >= snapshotLimit) return false;
+						rollbackData.snapshot().put(pos, new SnapshotBlock(level.getBlockState(pos), captureBlockEntityData(level, pos)));
+					}
+					// Keep container contents in the undo snapshot, not as dropped items.
+					if (level.getBlockEntity(pos) instanceof net.minecraft.world.Container container) container.clearContent();
+					level.removeBlockEntity(pos);
+					level.setBlock(pos, Blocks.AIR.defaultBlockState(), Block.UPDATE_CLIENTS | Block.UPDATE_SUPPRESS_DROPS);
+					return true;
+				});
+			if (status == SiteClearTask.Status.WAITING) waitingForChunks=true;
+			else if (status == SiteClearTask.Status.LIMIT) refuseClear(owner);
+			else if (status == SiteClearTask.Status.DONE) { clearFinished=true; syncScene(level,false); }
+		}
+
+		private void refuseClear(ServerPlayer owner) {
+			paused = true;
+			if (owner != null) owner.displayClientMessage(Component.translatable("message.grand_builder.clear_limit"), false);
 		}
 
 		private boolean prepareDismantle(ServerLevel level, GrandBuilderConfig config) {
@@ -2749,6 +2795,12 @@ public final class AnimatedBuildManager {
 			effectTick++;
 			BlockPos center = effectCenter(level);
 			switch (options.visualMode(effectMode)) {
+				case ORBITAL_STRIKE -> {
+					if (effectTick == 1) level.playSound(null, center, SoundEvents.BEACON_ACTIVATE, SoundSource.BLOCKS, 0.8f, 0.5f);
+					if (effectTick >= 32 && effectTick < 75 && effectTick % 8 == 0)
+						level.playSound(null, center, SoundEvents.AMETHYST_BLOCK_RESONATE, SoundSource.BLOCKS, 0.65f, 0.6f+effectTick/92f);
+					if (effectTick == 75) level.playSound(null, center, SoundEvents.TRIDENT_THROW.value(), SoundSource.BLOCKS, 1.4f, 0.5f);
+				}
 				case UFO_INVASION -> {
 					if ((effectTick % 16) == 1) {
 						level.playSound(null, center, SoundEvents.PORTAL_AMBIENT, SoundSource.BLOCKS, 0.45f, 0.65f);
@@ -2809,6 +2861,10 @@ public final class AnimatedBuildManager {
 		private void spawnInstantRevealBurst(ServerLevel level) {
 			BlockPos center = effectCenter(level);
 			switch (options.visualMode(effectMode)) {
+				case ORBITAL_STRIKE -> {
+					level.playSound(null, center, SoundEvents.TRIDENT_THUNDER.value(), SoundSource.BLOCKS, 2.0f, 0.5f);
+					level.playSound(null, center, SoundEvents.GENERIC_EXPLODE.value(), SoundSource.BLOCKS, 1.6f, 0.65f);
+				}
 				case BUILDER_CHARGE -> {
 					level.playSound(null, center, SoundEvents.GENERIC_EXPLODE.value(), SoundSource.BLOCKS, 1.3f, 0.55f);
 					level.playSound(null, center, SoundEvents.IRON_GOLEM_REPAIR, SoundSource.BLOCKS, 1.0f, 0.75f);
@@ -2851,6 +2907,8 @@ public final class AnimatedBuildManager {
 			if (check != PlacementResult.READY) return check;
 			BlockPos targetPos = transform(origin, facing, block);
 			BlockState rotatedState = rotateState(block.state(), facing);
+			if (options.clearsSite() && rollbackData != null && !rollbackData.snapshot().containsKey(targetPos))
+				rollbackData.snapshot().put(targetPos, new SnapshotBlock(level.getBlockState(targetPos), captureBlockEntityData(level, targetPos)));
 			if (effectMode == BuildEffectMode.DISMANTLE && dismantlePrepared) {
 				SnapshotBlock original = dismantleOriginals.get(targetPos);
 				if (original == null) return PlacementResult.SKIPPED;
@@ -2916,6 +2974,10 @@ public final class AnimatedBuildManager {
 		}
 
 		private long estimateTicksLeft(BuildSpeed speed) {
+			if (!clearFinished) {
+				return clearTask.estimateTicks()
+					+ estimateTicks(remainingBlocks(), speed, effectMode, options);
+			}
 			if (effectMode.instantReveal() && placedBlocks() <= 0) {
 				return Math.max(1L, effectMode.revealDelayTicks() - effectTick);
 			}

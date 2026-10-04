@@ -213,7 +213,7 @@ public final class GrandBuilderClientEffects {
 				impactPower = power;
 				impactAge = 0.0f;
 				impactColor = switch (BuildEffectMode.byNetworkId(payload.effectModeId())) {
-					case METEOR_FORGE, CLOCKWORK_GRID, BUILDER_CHARGE -> 0xFFE1A3;
+					case METEOR_FORGE, CLOCKWORK_GRID, BUILDER_CHARGE, ORBITAL_STRIKE -> 0xFFE1A3;
 					case RIFT_BLOOM -> 0xEBD2FF;
 					default -> 0xD8FFFF;
 				};

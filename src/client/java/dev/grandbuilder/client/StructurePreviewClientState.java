@@ -29,8 +29,11 @@ public final class StructurePreviewClientState {
 		int kind=Minecraft.getInstance().screen instanceof PreviewOrbit.View view ? view.previewKind() : StructurePreviewPayload.BUILD;
 		StructurePreviewPayload preview=PREVIEWS.get(kind);
 		if (preview==null || !preview.active()) return List.of();
-		double distance=camera.distanceToSqr((preview.min().getX()+preview.max().getX()+1)*0.5,
+		Vec3 center = new Vec3((preview.min().getX()+preview.max().getX()+1)*0.5,
 			(preview.min().getY()+preview.max().getY()+1)*0.5,(preview.min().getZ()+preview.max().getZ()+1)*0.5);
+		if (Minecraft.getInstance().screen instanceof PreviewOrbit.View)
+			center = PreviewOrbit.modelPosition(preview, center, PreviewOrbit.modelScale(preview));
+		double distance=camera.distanceToSqr(center);
 		return distance<512*512 ? List.of(preview) : List.of();
 	}
 }
