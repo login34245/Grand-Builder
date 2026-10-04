@@ -19,6 +19,7 @@ import net.fabricmc.fabric.api.client.rendering.v1.RenderStateDataKey;
 import net.fabricmc.fabric.api.client.rendering.v1.world.WorldExtractionContext;
 import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderContext;
 import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderEvents;
+import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.rendertype.RenderTypes;
 import net.minecraft.client.renderer.rendertype.RenderSetup;
@@ -71,8 +72,26 @@ public final class GrandBuilderWorldEffects {
 			.withDepthWrite(writeDepth)
 			.withBlend(emissive ? BlendFunction.ADDITIVE : BlendFunction.TRANSLUCENT);
 		if (emissive) builder.withShaderDefine("EMISSIVE");
-		return RenderTypeAccess.grandBuilder$create(name, RenderSetup.builder(builder.build())
+		RenderPipeline pipeline = builder.build();
+		registerIris(pipeline);
+		return RenderTypeAccess.grandBuilder$create(name, RenderSetup.builder(pipeline)
 			.sortOnUpload().bufferSize(256 * 1024).createRenderSetup());
+	}
+
+	private static void registerIris(RenderPipeline pipeline) {
+		if (!FabricLoader.getInstance().isModLoaded("iris")) return;
+		try {
+			// POSITION_COLOR needs Iris's basic program; unknown pipelines bypass its world targets.
+			Class<?> api = Class.forName("net.irisshaders.iris.api.v0.IrisApi");
+			Class<?> program = Class.forName("net.irisshaders.iris.api.v0.IrisProgram");
+			Object instance = api.getMethod("getInstance").invoke(null);
+			api.getMethod("assignPipeline", RenderPipeline.class, program)
+				.invoke(instance, pipeline, program.getField("BASIC").get(null));
+			GrandBuilderMod.LOGGER.info("Registered world effect pipeline {} with Iris", pipeline.getLocation());
+		} catch (ReflectiveOperationException | LinkageError exception) {
+			GrandBuilderMod.LOGGER.warn("Cannot register world effect pipeline {} with this Iris version",
+				pipeline.getLocation(), exception);
+		}
 	}
 
 	private static void extract(WorldExtractionContext context) {
