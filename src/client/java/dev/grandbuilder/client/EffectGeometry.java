@@ -150,20 +150,21 @@ public final class EffectGeometry {
 
 	private static void orbitalStrike(Mesh m, GrandBuilderClientEffects.Frame f) {
 		double t = f.phaseProgress();
-		double impactY = f.height() + 1.2;
+		double ground = 1.08;
+		double sky = f.height() + 64;
 		double size = Math.clamp(f.radius() * 0.32, 2.5, 9);
+		double extent = Math.max(f.width(), f.depth()) * 0.5 + 5;
 		if (!f.revealing()) {
-			double charge = ease(t / 0.76);
-			double launch = ease((t - 0.80) / 0.20);
-			double altitude = impactY + 68 * (1-launch);
-			// Three offset accelerator collars lock together before the final, fast descent.
+			double charge = ease(t / 0.72);
+			double launch = ease((t - 0.78) / 0.22);
+			// Solid accelerator collars surround converging, volumetric stars, not particle sprites.
 			for (int collar = 0; collar < 3; collar++) {
-				m.push(0, impactY + 56 + collar*6, 0);
+				m.push(0, sky - 8 + collar * 6, 0);
 				m.rotate((1-charge)*(collar-1)*0.7, f.motionAge()*0.014*(collar%2==0?1:-1), (1-charge)*0.25);
 				double ringRadius=size*(1.4+collar*0.22);
 				m.lathe(new double[] {ringRadius-0.25,ringRadius+0.25,ringRadius+0.25,ringRadius-0.25,ringRadius-0.25},
 					new double[] {-0.30,-0.30,0.30,0.30,-0.30},32,0x42525C);
-				m.torus(size*(1.4+collar*0.22), 0.07, 0.25, 0xFFF1C4, charge*(1-launch)*0.8);
+				m.torus(ringRadius, 0.10, 0.25, 0xBCEEFF, charge * 0.8);
 				for (int tooth = 0; tooth < 8; tooth++) {
 					double angle = tooth*TAU/8;
 					m.push(Math.cos(angle)*size*(1.4+collar*0.22), 0, Math.sin(angle)*size*(1.4+collar*0.22));
@@ -174,45 +175,73 @@ public final class EffectGeometry {
 				}
 				m.pop();
 			}
-			m.push(0, altitude + size*3, 0);
-			m.rotate(0, f.motionAge()*0.027, 0);
-			m.lathe(new double[] {0, size*0.48, size*0.60, size*0.38, size*0.25, 0},
-				new double[] {-size*3, -size*1.5, size, size*2, size*2.6, size*3}, 24, 0x455A68);
-			for (int fin = 0; fin < 4; fin++) {
-				m.push(0, 0, 0);
-				m.rotate(0, fin*Math.PI/2, 0);
-				m.push(size*0.53, 0, 0);
-				m.box(size*0.035, size*1.65, size*0.10, 0xE8F5FF, Material.GLOW, charge);
-				m.pop();
+			for (int star = 0; star < 24; star++) {
+				double gather = ease((t - (star % 6) * 0.028) / 0.70);
+				double angle = star * 2.399 + gather * 3.5 + f.motionAge() * 0.008;
+				double radius = (10 + star % 5 * 2.5) * (1 - gather) + size * 0.18;
+				double y = sky + (star % 7 - 3) * 4 * (1 - gather);
+				m.push(Math.cos(angle) * radius, y, Math.sin(angle) * radius);
+				m.rotate(gather * 1.4, angle, star * 0.21);
+				orbitalStar(m, 0.35 + (star % 3) * 0.12, charge * (1 - launch));
 				m.pop();
 			}
+			m.push(0, sky, 0);
+			m.rotate(0, f.motionAge() * 0.035, launch * 0.4);
+			orbitalStar(m, size * (0.6 + charge * 0.8), charge);
 			m.pop();
-			m.tube(0, impactY, 0, 0, impactY+60, 0, 0.035+charge*0.03, 0xFFF3D2, Material.GLOW, charge*0.32);
+			m.tube(0, ground, 0, 0, sky, 0, 0.035 + charge * 0.05, 0xCBEFFF, Material.GLOW, charge * 0.45);
 			if (launch > 0) {
-				m.tube(0, altitude+size*5, 0, 0, impactY+100, 0, size*0.25, 0xE3F7FF, Material.GLOW, 1-launch);
+				double tip = sky + (ground - sky) * launch;
+				orbitalBeam(m, tip, sky + 12, size, launch);
+				m.push(0, tip, 0);
+				orbitalStar(m, size * 0.75, launch);
+				m.pop();
 			}
-			m.push(0, impactY, 0);
-			m.torus(size*(1.6-charge*0.5), 0.05, 0, 0xFFF1C4, charge*0.7);
+			m.push(0, ground, 0);
+			m.rectangle(extent, extent, 0.055, 0xB5E8FF, charge * 0.5);
+			m.rectangle(extent * (1 - charge * 0.35), extent * (1 - charge * 0.35), 0.025, 0xFFF1C4, charge * 0.35);
+			for (int x : new int[] {-1, 1}) for (int z : new int[] {-1, 1}) {
+				m.tube(x * extent, 0, z * extent, x * extent, 2 + charge * 2, z * extent, 0.07, 0xC9F4FF, Material.GLOW, charge * 0.7);
+			}
 			m.pop();
 			return;
 		}
-		double pulse = 1-ease(t/0.18);
+		double pulse = 1 - ease(t / 0.32);
+		double beam = 1 - ease((t - 0.12) / 0.60);
 		double spread = 1-Math.pow(1-t, 4);
-		m.push(0, impactY, 0);
-		m.sphere(size*(0.4+ease(t/0.12)*2), 0xF4FDFF, pulse*0.65);
-		m.tube(0, -f.height(), 0, 0, 85*(1-t), 0, size*(0.4+t), 0xFFF4D6, Material.GLOW, pulse*0.8);
-		for (int plane = 0; plane < 3; plane++) {
-			m.push(0, 0, 0);
-			m.rotate(plane==0?0:Math.PI/2, plane*Math.PI/3, plane==2?Math.PI/2:0);
-			m.torus((f.radius()+12)*spread*(1-plane*0.12), 0.20*(1-t)+0.02, 0,
-				plane==0?0xFFE7AA:0xB4EBFF, (1-t)*0.8);
+		orbitalBeam(m, ground, sky + 12, size, beam);
+		m.push(0, sky, 0);
+		m.rotate(0, f.motionAge() * 0.045, 0);
+		orbitalStar(m, size * (1.2 + pulse), beam);
+		m.pop();
+		m.push(0, f.height() + 1, 0);
+		m.sphere(size * (0.4 + ease(t / 0.12) * 2), 0xF4FDFF, pulse * 0.4);
+		m.pop();
+		// The square shock front extends beyond the house so the overhead silhouette stays visible.
+		for (int ring = 0; ring < 3; ring++) {
+			if (t < ring * 0.07) continue;
+			double progress = clamp((t - ring * 0.07) / (1 - ring * 0.07));
+			double radius = extent * (1 + (1 - Math.pow(1 - progress, 3)) * 1.25);
+			m.push(0, ground + 0.12 + ring * 0.025, 0);
+			squareShockwave(m, radius, Math.max(0.5, extent * 0.08) * (1 - progress), 0.6 + (1 - progress) * 2,
+				ring == 0 ? 0xFFE5AC : 0xB7ECFF, (1 - progress) * (ring == 0 ? 0.7 : 0.35));
 			m.pop();
 		}
-		m.pop();
-		blastWave(m, (f.radius()+12)*1.65, t);
+		for (int tile = 0; tile < 32; tile++) {
+			int edge = tile / 8;
+			double offset = ((tile % 8 + 0.5) / 8.0 * 2 - 1) * extent;
+			double jump = Math.max(0, Math.sin(clamp((t - (tile % 4) * 0.025) / 0.72) * Math.PI));
+			double outward = extent * (1.02 + spread * 0.42);
+			m.push(edge % 2 == 0 ? offset : (edge == 1 ? outward : -outward), ground + jump * 2.8,
+				edge % 2 == 1 ? offset : (edge == 0 ? outward : -outward));
+			m.rotate(jump * (edge % 2 == 0 ? 0.55 : 0), edge * Math.PI / 2, jump * (edge % 2 == 1 ? -0.55 : 0));
+			m.box(extent * 0.09, 0.12, 0.65, 0x253841, Material.VEIL, (1 - t) * 0.7);
+			m.box(extent * 0.09, 0.015, 0.66, 0xF7D590, Material.GLOW, (1 - t) * 0.55);
+			m.pop();
+		}
 		for (int shard = 0; shard < 28; shard++) {
 			double angle = shard*2.399, distance = (f.radius()+8)*spread;
-			m.push(Math.cos(angle)*distance, impactY + Math.sin(t*Math.PI)*(8+shard%6)-t*t*5, Math.sin(angle)*distance);
+			m.push(Math.cos(angle)*distance, f.height() + 1 + Math.sin(t*Math.PI)*(8+shard%6)-t*t*5, Math.sin(angle)*distance);
 			m.rotate(shard+t*8, t*6, angle);
 			m.box(0.06+shard%3*0.02, 0.28, 0.65, 0x3B5361, Material.SOLID, 1-ease((t-0.45)/0.55));
 			m.box(0.025, 0.30, 0.66, 0xD8F7FF, Material.GLOW, (1-t)*0.6);
@@ -222,6 +251,37 @@ public final class EffectGeometry {
 		m.push(0, f.height()*scan+0.08, 0);
 		m.rectangle(f.width()*0.5+0.2, f.depth()*0.5+0.2, 0.08, 0xFFF0C8, (1-t)*0.65);
 		m.pop();
+	}
+
+	private static void orbitalStar(Mesh m, double radius, double alpha) {
+		m.octahedron(radius * 0.22, radius * 0.22, radius * 0.22, 0xFFFFFF, Material.GLOW, alpha);
+		for (int ray = 0; ray < 4; ray++) {
+			m.push(0, 0, 0);
+			m.rotate(0, ray * Math.PI / 4, 0);
+			m.octahedron(radius * (ray % 2 == 0 ? 1 : 0.65), radius * 0.06, radius * 0.09,
+				ray % 2 == 0 ? 0xD5F4FF : 0xFFDF98, Material.GLOW, alpha * 0.8);
+			m.pop();
+		}
+		m.octahedron(radius * 0.06, radius * 0.6, radius * 0.06, 0xD5F4FF, Material.GLOW, alpha * 0.5);
+	}
+
+	private static void orbitalBeam(Mesh m, double bottom, double top, double size, double alpha) {
+		m.tube(0, bottom, 0, 0, top, 0, size * 0.23, 0xFFFFFF, Material.GLOW, alpha * 0.95);
+		m.tube(0, bottom, 0, 0, top, 0, size * 0.48, 0xC5EBFF, Material.GLOW, alpha * 0.27);
+		m.tube(0, bottom, 0, 0, top, 0, size * 0.9, 0xFFE7AE, Material.GLOW, alpha * 0.09);
+	}
+
+	private static void squareShockwave(Mesh m, double radius, double thickness, double crest, int rgb, double alpha) {
+		for (int edge = 0; edge < 4; edge++) {
+			m.push(0, 0, 0);
+			m.rotate(0, edge * Math.PI / 2, 0);
+			m.quad(Material.GLOW, new double[] {-radius, 0, radius - thickness}, new double[] {radius, 0, radius - thickness},
+				new double[] {radius, 0, radius + thickness}, new double[] {-radius, 0, radius + thickness}, rgb, alpha * 0.6);
+			m.quad(Material.GLOW, new double[] {-radius, 0, radius}, new double[] {radius, 0, radius},
+				new double[] {radius, crest, radius + thickness}, new double[] {-radius, crest, radius + thickness}, rgb, alpha * 0.35);
+			m.tube(-radius, crest, radius + thickness, radius, crest, radius + thickness, 0.065, rgb, Material.GLOW, alpha);
+			m.pop();
+		}
 	}
 
 	private static void builderCharge(Mesh m, GrandBuilderClientEffects.Frame f) {

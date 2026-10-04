@@ -26,6 +26,7 @@ public final class BuilderControlsTest {
 		verifyClearVolume();
 		verifyClearTask();
 		verifyCodec();
+		verifyFilming();
 		verifyTranslations();
 		Path temporary = Files.createTempDirectory("grand-builder-tips-test-");
 		try { verifyPreferences(temporary); }
@@ -138,11 +139,48 @@ public final class BuilderControlsTest {
 		var english = JsonParser.parseString(Files.readString(folder.resolve("en_us.json"))).getAsJsonObject();
 		var russian = JsonParser.parseString(Files.readString(folder.resolve("ru_ru.json"))).getAsJsonObject();
 		check(english.keySet().equals(russian.keySet()), "EN/RU translation keys differ");
+		for (var action : dev.grandbuilder.network.FilmingAction.values()) {
+			if (action != dev.grandbuilder.network.FilmingAction.STATUS)
+				check(english.has(action.translationKey()) && russian.has(action.translationKey()), "Missing filming action label");
+		}
 		for (int tip = 0; tip < BuilderTipPreferences.TIP_COUNT; tip++) {
 			String key = "screen.grand_builder.tips.tip" + tip;
 			check(english.has(key) && !english.get(key).getAsString().isBlank(), "Missing English tip");
 			check(russian.has(key) && !russian.get(key).getAsString().isBlank(), "Missing Russian tip");
 		}
+	}
+
+	private static void verifyFilming() {
+		for (int[] viewport : new int[][] {{640,360,346}, {427,240,346}, {320,180,308}, {1920,1080,346}}) {
+			int left = (viewport[0] - viewport[2]) / 2;
+			for (float progress : new float[] {0, 0.25f, 0.5f, 0.75f, 1}) {
+				var tab = FilmingTabLayout.at(viewport[0], left, 6, viewport[2], progress);
+				check(tab.x() >= 0 && tab.x() + tab.width() <= viewport[0], "Filming tab leaves the viewport");
+				check(tab.inHeader() || tab.x() + tab.width() <= left || tab.x() >= left + viewport[2], "Side tab overlaps builder controls");
+				check(!tab.inHeader() || tab.y()+tab.height() < 6+18, "Compact filming tab overlaps the ETA header");
+			}
+			check(FilmingTabLayout.at(viewport[0],left,6,viewport[2],1).width()
+				== FilmingTabLayout.at(viewport[0],left,6,viewport[2],0).width()*3, "Tab must expand to exactly three times its width");
+		}
+		for (var action : dev.grandbuilder.network.FilmingAction.values()) {
+			check(dev.grandbuilder.network.FilmingAction.byId(action.ordinal()) == action, "Filming action ID changed");
+			var request = new dev.grandbuilder.network.FilmingToolsPayload(action.ordinal());
+			var buffer = new RegistryFriendlyByteBuf(Unpooled.buffer(), RegistryAccess.EMPTY);
+			try {
+				dev.grandbuilder.network.FilmingToolsPayload.CODEC.encode(buffer, request);
+				check(dev.grandbuilder.network.FilmingToolsPayload.CODEC.decode(buffer).equals(request), "Filming request did not roundtrip");
+			} finally { buffer.release(); }
+			if (action.changesTime()) check(action.dayTime() >= 0 && action.dayTime() < 24000, "Invalid filming time");
+		}
+		check(dev.grandbuilder.network.FilmingAction.byId(-1) == null && dev.grandbuilder.network.FilmingAction.byId(999) == null,
+			"Invalid filming action must never run a command");
+		var state = new dev.grandbuilder.network.FilmingStatePayload(true, true, 12000, 2, 1);
+		var buffer = new RegistryFriendlyByteBuf(Unpooled.buffer(), RegistryAccess.EMPTY);
+		try {
+			dev.grandbuilder.network.FilmingStatePayload.CODEC.encode(buffer, state);
+			check(dev.grandbuilder.network.FilmingStatePayload.CODEC.decode(buffer).equals(state), "Filming feedback lost server state");
+		} finally { buffer.release(); }
+		System.out.println("Filming tab bounds, exact 3x expansion, bounded actions and bidirectional codecs verified.");
 	}
 
 	private static void verifyPreferences(Path temporary) throws Exception {

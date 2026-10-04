@@ -10,6 +10,9 @@ import dev.grandbuilder.build.CustomCaptureFormat;
 import dev.grandbuilder.build.StructureSelectionManager;
 import dev.grandbuilder.build.StructureLibrary;
 import dev.grandbuilder.build.WorldImportManager;
+import dev.grandbuilder.build.FilmingToolsManager;
+import dev.grandbuilder.network.FilmingToolsPayload;
+import dev.grandbuilder.network.FilmingStatePayload;
 import dev.grandbuilder.config.GrandBuilderConfig;
 import dev.grandbuilder.item.StructureCoreItem;
 import dev.grandbuilder.item.StructureSelectorItem;
@@ -118,6 +121,8 @@ public class GrandBuilderMod implements ModInitializer {
 		PayloadTypeRegistry.playC2S().register(StructureInspectRequestPayload.TYPE, StructureInspectRequestPayload.CODEC);
 		PayloadTypeRegistry.playC2S().register(WorldImportRequestPayload.TYPE, WorldImportRequestPayload.CODEC);
 		PayloadTypeRegistry.playS2C().register(WorldImportStatePayload.TYPE, WorldImportStatePayload.CODEC);
+		PayloadTypeRegistry.playC2S().register(FilmingToolsPayload.TYPE, FilmingToolsPayload.CODEC);
+		PayloadTypeRegistry.playS2C().register(FilmingStatePayload.TYPE, FilmingStatePayload.CODEC);
 
 		AttackBlockCallback.EVENT.register((player, world, hand, pos, direction) -> {
 			if (!player.getItemInHand(hand).is(STRUCTURE_SELECTOR)) {
@@ -183,6 +188,8 @@ public class GrandBuilderMod implements ModInitializer {
 			context.server().execute(() -> WorldImportManager.inspect(context.player(), payload.structureKey())));
 		ServerPlayNetworking.registerGlobalReceiver(WorldImportRequestPayload.TYPE, (payload, context) ->
 			context.server().execute(() -> WorldImportManager.handle(context.player(), payload)));
+		ServerPlayNetworking.registerGlobalReceiver(FilmingToolsPayload.TYPE, (payload, context) ->
+			context.server().execute(() -> FilmingToolsManager.handle(context.player(), payload)));
 
 		ServerTickEvents.END_SERVER_TICK.register(server -> {
 			AnimatedBuildManager.tick(server);
@@ -191,10 +198,12 @@ public class GrandBuilderMod implements ModInitializer {
 		ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> server.execute(() -> {
 			AnimatedBuildManager.onPlayerDisconnect(handler.player);
 			WorldImportManager.onDisconnect(handler.player);
+			FilmingToolsManager.disconnect(handler.player.getUUID());
 		}));
 		ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
 			AnimatedBuildManager.shutdown();
 			WorldImportManager.clear();
+			FilmingToolsManager.clear();
 		});
 
 		CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->

@@ -902,6 +902,17 @@ public final class AnimatedBuildManager {
 		return speed.translationKey();
 	}
 
+	public static void setFilmingDayTime(ServerLevel level, long dayTime) {
+		for (BuildJob job : ACTIVE_BUILDS) {
+			if (job.dimensionKey.equals(level.dimension()) && job.clockworkOriginalDayTime != Long.MIN_VALUE) {
+				// Keep the explicit filming time after Clockwork restores its temporary warp.
+				job.clockworkOriginalDayTime = dayTime;
+				job.clockworkWarpSessionTicks = 0;
+			}
+		}
+		level.setDayTime(dayTime);
+	}
+
 	private static boolean checkCanUse(ServerPlayer player, boolean requireCore, boolean showMessage) {
 		GrandBuilderConfig config = GrandBuilderConfig.get();
 		if (!config.hasPermission(player)) {
@@ -2447,7 +2458,7 @@ public final class AnimatedBuildManager {
 				if (placeBlock(level, block, index + 1, config) != PlacementResult.PLACED) continue;
 				BlockState installed = rotateState(block.state(), facing);
 				CompoundTag installedNbt = captureBlockEntityData(level, target);
-				if (before.state().equals(installed) && Objects.equals(before.blockEntityNbt(), installedNbt)) continue;
+				if (DismantleStateGuard.matches(installed, before.state()) && Objects.equals(before.blockEntityNbt(), installedNbt)) continue;
 				if (rollbackData != null) rollbackData.snapshot().putIfAbsent(target, before);
 				if (installed.isAir()) dismantleCleanup.putIfAbsent(target, before);
 				else {
@@ -2943,7 +2954,7 @@ public final class AnimatedBuildManager {
 
 			BlockState rotatedState = rotateState(block.state(), facing);
 			if (effectMode == BuildEffectMode.DISMANTLE && dismantlePrepared) {
-				boolean unchanged = level.getBlockState(targetPos).equals(rotatedState)
+				boolean unchanged = DismantleStateGuard.matches(rotatedState, level.getBlockState(targetPos))
 					&& (!rotatedState.hasBlockEntity() || Objects.equals(dismantleExpectedNbt.get(targetPos),captureBlockEntityData(level,targetPos)));
 				return unchanged && dismantleOriginals.containsKey(targetPos) ? PlacementResult.READY : PlacementResult.SKIPPED;
 			}

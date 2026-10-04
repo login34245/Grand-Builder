@@ -66,6 +66,8 @@ public final class EffectGeometryTest {
 		int bolts = verifyLightning();
 		verifyOptions();
 		verifyReplacementOptions();
+		verifyDismantleConnections();
+		verifyOrbitalStrike();
 		verifyBuildDirections();
 		verifyCadence();
 		verifyKinetic();
@@ -108,6 +110,52 @@ public final class EffectGeometryTest {
 			orbit.zoom(-100);
 			check(orbit.pose(center,40,260,40,screen[0],screen[1],screen[2],70).position().distanceTo(center)<=480.001, "Zoom makes preview disappear");
 		}
+	}
+
+	private static void verifyDismantleConnections() {
+		SharedConstants.tryDetectVersion(); Bootstrap.bootStrap();
+		for (var block : new net.minecraft.world.level.block.Block[] {Blocks.OAK_FENCE, Blocks.NETHER_BRICK_FENCE,
+			Blocks.IRON_BARS, Blocks.GLASS_PANE, Blocks.COBBLESTONE_WALL}) {
+			BlockState installed = block.defaultBlockState(), connected = installed;
+			for (var property : installed.getProperties()) {
+				if (java.util.Set.of("north","east","south","west","up").contains(property.getName()))
+					connected = connected.cycle(property);
+			}
+			check(!installed.equals(connected), "Test did not change neighboring connections");
+			check(dev.grandbuilder.build.DismantleStateGuard.matches(installed, connected), "Dismantle skipped a neighbor-updated fence, pane or wall");
+			check(dev.grandbuilder.build.DismantleStateGuard.matches(connected, installed), "Pre-existing connected fence is not protected");
+			check(!dev.grandbuilder.build.DismantleStateGuard.matches(installed,
+				connected.setValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.WATERLOGGED,true)), "Waterlogging edits must be protected");
+			check(!dev.grandbuilder.build.DismantleStateGuard.matches(installed,Blocks.AIR.defaultBlockState()), "Replaced fence must be protected");
+		}
+		var gate = Blocks.OAK_FENCE_GATE.defaultBlockState();
+		check(dev.grandbuilder.build.DismantleStateGuard.matches(gate,gate.setValue(net.minecraft.world.level.block.FenceGateBlock.IN_WALL,true)), "Gate's automatic wall state blocks dismantling");
+		check(!dev.grandbuilder.build.DismantleStateGuard.matches(gate,gate.setValue(net.minecraft.world.level.block.FenceGateBlock.OPEN,true)), "Player-opened gate must be protected");
+		check(!dev.grandbuilder.build.DismantleStateGuard.matches(Blocks.OAK_LOG.defaultBlockState(),
+			Blocks.OAK_LOG.defaultBlockState().setValue(net.minecraft.world.level.block.RotatedPillarBlock.AXIS,Direction.Axis.X)), "Ordinary player edits must retain strict protection");
+		System.out.println("Dismantle connections verified: fences, panes, walls and gates; block replacements, waterlogging and manual states protected.");
+	}
+
+	private static void verifyOrbitalStrike() {
+		for (double size : new double[] {1,20,256}) for (int phase : new int[] {BuildEffectPayload.PHASE_ARRIVAL,BuildEffectPayload.PHASE_REVEAL}) {
+			Stats previous = null;
+			for (float age : new float[] {0,1,8,16,28,40,51,72,84,91}) {
+				int duration = phase == BuildEffectPayload.PHASE_ARRIVAL ? 92 : 52;
+				Stats stats = new Stats();
+				EffectGeometry.emit(new GrandBuilderClientEffects.Frame(BuildEffectMode.ORBITAL_STRIKE,phase,age,age,duration,0,1,
+					0,64,0,size,size*0.75,size*0.8), stats::accept);
+				check(stats.count>100 && stats.count<20000, "Orbital timing causes missing or unbounded geometry");
+				if (phase == BuildEffectPayload.PHASE_REVEAL && age <= 28) {
+					check(stats.min[1] < 1.3 && stats.max[1] > size*0.75+60, "Orbital beam does not reach the ground and sky");
+					check(stats.max[0] > size*0.5 && stats.max[2] > size*0.5, "Square impact is hidden inside the building footprint");
+				}
+				if (previous != null && age < duration) check(stats.fingerprint != previous.fingerprint,"Orbital stars or shock front is static");
+				previous = stats;
+			}
+		}
+		check(BuildEffectMode.ORBITAL_STRIKE.revealDelayTicks()==92 && BuildEffectMode.ORBITAL_STRIKE.networkId()==15,
+			"Orbital timing or existing mode ID changed");
+		System.out.println("Orbital stars, sky-to-ground beam, overhead square front and 92/52-tick scene geometry verified.");
 	}
 
 	private static void verifyPreviewPlacement() {

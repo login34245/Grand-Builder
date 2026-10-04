@@ -2,6 +2,8 @@ package dev.grandbuilder;
 
 import com.mojang.blaze3d.platform.InputConstants;
 import dev.grandbuilder.client.BuilderMenuScreen;
+import dev.grandbuilder.client.FilmingToolsScreen;
+import dev.grandbuilder.network.FilmingStatePayload;
 import dev.grandbuilder.client.BuildStatusClientState;
 import dev.grandbuilder.client.GrandBuilderClientEffects;
 import dev.grandbuilder.client.GrandBuilderWorldEffects;
@@ -107,6 +109,10 @@ public class GrandBuilderModClient implements ClientModInitializer {
 				else PreviewConfirmState.disarm();
 			})
 		);
+		ClientPlayNetworking.registerGlobalReceiver(FilmingStatePayload.TYPE, (payload, context) ->
+			context.client().execute(() -> {
+				if (context.client().screen instanceof FilmingToolsScreen screen) screen.receiveState(payload);
+			}));
 		ClientPlayNetworking.registerGlobalReceiver(StructureListPayload.TYPE, (payload, context) ->
 			context.client().execute(() -> StructureListClientState.update(payload))
 		);

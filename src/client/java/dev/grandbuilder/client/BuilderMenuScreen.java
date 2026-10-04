@@ -75,6 +75,7 @@ public class BuilderMenuScreen extends Screen {
 	private Button cancelPreviewButton;
 	private Button youtubeButton;
 	private CycleButton<Boolean> tipsButton;
+	private FilmingTabButton filmingTab;
 	private boolean checkedAutomaticTip;
 	private boolean terrainEnabled = true;
 	private int statusPollCooldown = 0;
@@ -235,6 +236,11 @@ public class BuilderMenuScreen extends Screen {
 			.create(layout.innerRight() - YOUTUBE_BADGE_SIZE - 84, layout.etaY() - 2, 80, 14,
 				Component.translatable("screen.grand_builder.tips.title"),
 				(button, enabled) -> BuilderTipPreferences.get().setEnabled(enabled)));
+		this.filmingTab = this.addRenderableWidget(new FilmingTabButton(() -> {
+			UiLayout current = layout();
+			return FilmingTabLayout.at(width, current.left(), current.top(), current.panelWidth(),
+				filmingTab == null ? 0 : filmingTab.expansion());
+		}, button -> minecraft.setScreen(new FilmingToolsScreen(this))));
 		updateEffectDependentControls();
 
 		sendControl(BuildControlAction.STATUS_SILENT);
@@ -691,7 +697,11 @@ public class BuilderMenuScreen extends Screen {
 			guiGraphics.fill(left + 16, layout.statusSeparatorY(), right - 16, layout.statusSeparatorY() + 1, 0x33577EA3);
 		}
 
-		drawCenteredFittedString(guiGraphics, Component.translatable("screen.grand_builder.title"), panelCenterX, layout.titleY(), Math.max(80, layout.contentWidth() - 90), 0xFFF6FAFF);
+		boolean tabInHeader = FilmingTabLayout.at(width, left, top, layout.panelWidth(), 1).inHeader();
+		int titleLeft = tabInHeader ? left + FilmingTabLayout.OPEN_WIDTH + 18 : layout.innerLeft();
+		int titleRight = layout.youtubeButtonLeft() - 6;
+		drawCenteredFittedString(guiGraphics, Component.translatable("screen.grand_builder.title"), (titleLeft + titleRight) / 2,
+			layout.titleY(), Math.max(20, titleRight - titleLeft), 0xFFF6FAFF);
 		renderEta(guiGraphics, layout);
 		if (layout.showSubtitle()) {
 			drawCenteredFittedString(guiGraphics, Component.translatable("screen.grand_builder.subtitle"), panelCenterX, layout.subtitleY(), layout.contentWidth(), 0xFFB3D2F0);
