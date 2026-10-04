@@ -1,4 +1,5 @@
 {
+  "message.grand_builder.structure_load_failed": "Could not load %s: the file is invalid or exceeds the safe memory budget. See latest.log.",
   "key.grand_builder.fast_preview_movement": "Preview Movement: Hold for 10-Block Steps",
   "screen.grand_builder.tips.title": "Tip of the Day",
   "screen.grand_builder.tips.on": "Tips: ON",

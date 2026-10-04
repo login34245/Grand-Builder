@@ -90,7 +90,15 @@ tasks.register('verifyBuilderControls', JavaExec) {
 }
 
 tasks.named('check') {
-	dependsOn verifyEffectGeometry, verifyWorldImport, verifyBuilderControls
+	dependsOn verifyEffectGeometry, verifyWorldImport, verifyBuilderControls, verifyStructureLibrary
+}
+
+tasks.register('verifyStructureLibrary', JavaExec) {
+	dependsOn geometryTestClasses
+	classpath = sourceSets.geometryTest.runtimeClasspath
+	mainClass = 'dev.grandbuilder.build.StructureLibraryTest'
+	maxHeapSize = '2g'
+	if (project.hasProperty('structureTestDirectory')) args project.property('structureTestDirectory')
 }
 
 jar {

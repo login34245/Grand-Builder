@@ -187,7 +187,12 @@ public final class WorldImportManager {
 		StructureLibrary.ResolvedStructure structure=StructureLibrary.resolveSelection(structureKey);
 		List<GrandPalaceBlueprint.RelativeBlock> blocks=structure.custom()
 			? AnimatedBuildManager.capturedBlueprint(player.getUUID()) : structure.blueprint();
-		if (!structure.key().equals(structureKey) || blocks==null || blocks.isEmpty()) return;
+		if (!structure.key().equals(structureKey) || blocks==null || blocks.isEmpty()) {
+			clearPreview(player,StructurePreviewPayload.INSPECT);
+			player.displayClientMessage(net.minecraft.network.chat.Component.translatable(
+				structure.custom() ? "message.grand_builder.custom_missing" : "message.grand_builder.structure_load_failed", structure.displayName()),true);
+			return;
+		}
 		int radius=Math.max(12,structure.spawnDistance());
 		BlockPos anchor=player.blockPosition().relative(player.getDirection(),Math.min(80,radius));
 		ServerPlayNetworking.send(player,StructurePreviewSampler.blueprint(StructurePreviewPayload.INSPECT,

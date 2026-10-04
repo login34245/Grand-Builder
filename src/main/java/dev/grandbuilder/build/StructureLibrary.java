@@ -3,6 +3,8 @@ package dev.grandbuilder.build;
 import dev.grandbuilder.config.GrandBuilderConfig;
 import dev.grandbuilder.network.StructureListPayload;
 import java.io.IOException;
+import java.io.BufferedInputStream;
+import java.io.DataInputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -10,6 +12,11 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Collections;
+import java.util.function.IntSupplier;
+import java.nio.file.attribute.BasicFileAttributes;
+import net.minecraft.core.BlockPos;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -32,8 +39,14 @@ import org.slf4j.LoggerFactory;
 
 public final class StructureLibrary {
 	private static final Logger LOGGER = LoggerFactory.getLogger("grand_builder/structures");
-	private static final Path PRIMARY_STRUCTURES_DIR = FabricLoader.getInstance().getGameDir().resolve("grand_builder").resolve("structures");
-	private static final Path SHARED_STRUCTURES_DIR = detectSharedStructuresDir();
+	private static final int MAX_DENSE_POSITIONS = 50_000_000;
+	private static final int MAX_MATERIALIZED_POSITIONS = 2_000_000;
+
+	private static final class Directories {
+		static final Path PRIMARY = FabricLoader.getInstance().getGameDir().resolve("grand_builder").resolve("structures");
+		static final Path SHARED = detectSharedStructuresDir();
+		static final ExternalCatalog CATALOG = new ExternalCatalog(structureDirectories(), () -> GrandBuilderConfig.get().maxExternalStructureFiles);
+	}
 	private static final int MULTI_NBT_STRIDE = 48;
 	private static final long EXTERNAL_CACHE_TTL_MILLIS = 5000L;
 
@@ -51,9 +64,7 @@ public final class StructureLibrary {
 		"wooden_farm", "Wooden Farm"
 	);
 
-	private static final Object EXTERNAL_CACHE_LOCK = new Object();
-	private static volatile long externalCacheExpiresAt;
-	private static volatile Map<String, ExternalStructure> externalCache = Map.of();
+
 
 	private StructureLibrary() {
 	}
@@ -70,14 +81,11 @@ public final class StructureLibrary {
 
 	public static Path structuresDirectory() {
 		ensureStructuresDirectory();
-		return PRIMARY_STRUCTURES_DIR;
+		return Directories.PRIMARY;
 	}
 
 	public static void clearExternalCache() {
-		synchronized (EXTERNAL_CACHE_LOCK) {
-			externalCacheExpiresAt = 0L;
-			externalCache = Map.of();
-		}
+		Directories.CATALOG.clear();
 	}
 
 	public static List<SelectionEntry> listBuiltinSelections() {
@@ -91,13 +99,13 @@ public final class StructureLibrary {
 	public static List<SelectionEntry> listPreferredSelections() {
 		ensureStructuresDirectory();
 
-		List<ExternalStructure> externalStructures = sortedExternalStructures(externalStructuresCached().values());
+		List<ExternalSource> externalStructures = sortedExternalSources(externalStructuresCached().values());
 		if (externalStructures.isEmpty()) {
 			return listBuiltinSelections();
 		}
 
 		List<SelectionEntry> selections = new ArrayList<>();
-		for (ExternalStructure structure : externalStructures) {
+		for (ExternalSource structure : externalStructures) {
 			selections.add(new SelectionEntry(structure.key(), Component.literal(structure.displayName())));
 		}
 		selections.add(new SelectionEntry(
@@ -126,9 +134,9 @@ public final class StructureLibrary {
 		ensureStructuresDirectory();
 		List<StructureListPayload.Entry> selections = new ArrayList<>();
 
-		List<ExternalStructure> externalStructures = sortedExternalStructures(externalStructuresCached().values());
+		List<ExternalSource> externalStructures = sortedExternalSources(externalStructuresCached().values());
 		if (!externalStructures.isEmpty()) {
-			for (ExternalStructure structure : externalStructures) {
+			for (ExternalSource structure : externalStructures) {
 				selections.add(new StructureListPayload.Entry(
 					structure.key(),
 					structure.displayName(),
@@ -169,27 +177,14 @@ public final class StructureLibrary {
 			);
 		}
 
-		ExternalStructure external = externalStructuresCached().get(key);
-		if (external != null) {
-			return new ResolvedStructure(
-				external.key(),
-				Component.literal(external.displayName()),
-				external.spawnDistance(),
-				false,
-				external.blueprint()
-			);
-		}
-
-		List<ExternalStructure> externalStructures = sortedExternalStructures(externalStructuresCached().values());
-		if (!externalStructures.isEmpty()) {
-			ExternalStructure fallbackExternal = externalStructures.get(0);
-			return new ResolvedStructure(
-				fallbackExternal.key(),
-				Component.literal(fallbackExternal.displayName()),
-				fallbackExternal.spawnDistance(),
-				false,
-				fallbackExternal.blueprint()
-			);
+		Map<String, ExternalSource> sources = externalStructuresCached();
+		ExternalSource source = sources.get(key);
+		if (source == null && !sources.isEmpty()) source = sortedExternalSources(sources.values()).get(0);
+		if (source != null) {
+			ExternalStructure external = Directories.CATALOG.resolve(source);
+			return new ResolvedStructure(source.key(), Component.literal(source.displayName()),
+				external == null ? 10 : external.spawnDistance(), false,
+				external == null ? List.of() : external.blueprint());
 		}
 
 		BuildStructure fallback = BuildStructure.CUSTOM;
@@ -202,102 +197,207 @@ public final class StructureLibrary {
 		);
 	}
 
-	private static Map<String, ExternalStructure> externalStructuresCached() {
-		long now = System.currentTimeMillis();
-		Map<String, ExternalStructure> snapshot = externalCache;
-		if (now < externalCacheExpiresAt && !snapshot.isEmpty()) {
-			return snapshot;
+	private static Map<String, ExternalSource> externalStructuresCached() {
+		return GrandBuilderConfig.get().allowExternalStructures ? Directories.CATALOG.sources() : Map.of();
+	}
+
+	// Listing only stats files. Decoding uses a separate lock and retains at most one selected blueprint.
+	static final class ExternalCatalog {
+		private final List<Path> directories;
+		private final IntSupplier fileLimit;
+		private final Object indexLock = new Object(), decodeLock = new Object();
+		private volatile Map<String, ExternalSource> index = Map.of();
+		private volatile long expiresAt;
+		private ExternalSource loadedSource;
+		private ExternalStructure loaded;
+		private final Map<ExternalSource, Boolean> failures = new LinkedHashMap<>();
+
+		ExternalCatalog(List<Path> directories, IntSupplier fileLimit) {
+			this.directories = List.copyOf(directories);
+			this.fileLimit = fileLimit;
 		}
 
-		synchronized (EXTERNAL_CACHE_LOCK) {
-			if (now < externalCacheExpiresAt && !externalCache.isEmpty()) {
-				return externalCache;
+		Map<String, ExternalSource> sources() {
+			if (System.currentTimeMillis() < expiresAt) return index;
+			synchronized (indexLock) {
+				if (System.currentTimeMillis() < expiresAt) return index;
+				index = scanSources(directories, Math.max(1, fileLimit.getAsInt()));
+				expiresAt = System.currentTimeMillis() + EXTERNAL_CACHE_TTL_MILLIS;
+				return index;
 			}
+		}
 
-			Map<String, ExternalStructure> loaded = loadExternalStructuresUncached();
-			externalCache = loaded;
-			externalCacheExpiresAt = now + EXTERNAL_CACHE_TTL_MILLIS;
-			return loaded;
+		void refresh() { expiresAt = 0; }
+		void clear() {
+			refresh();
+			synchronized (decodeLock) { loadedSource = null; loaded = null; failures.clear(); }
+		}
+
+		ExternalStructure resolve(ExternalSource source) {
+			synchronized (decodeLock) {
+				if (source.equals(loadedSource)) return loaded;
+				if (failures.containsKey(source)) return null;
+				loaded = null;
+				loadedSource = null;
+				try {
+					loaded = loadSource(source);
+					if (loaded == null || loaded.blueprint().isEmpty()) throw new IOException("Structure contains no readable blocks");
+					loadedSource = source;
+					LOGGER.info("Loaded selected structure {} ({} positions)", source.displayName(), loaded.blueprint().size());
+					return loaded;
+				} catch (Exception exception) {
+					loaded = null;
+					failures.put(source, Boolean.TRUE);
+					if (failures.size() > 64) failures.remove(failures.keySet().iterator().next());
+					LOGGER.warn("Unable to load selected structure {}: {}", source.files(), exception.toString());
+					return null;
+				}
+			}
 		}
 	}
 
-	private static Map<String, ExternalStructure> loadExternalStructuresUncached() {
-		GrandBuilderConfig config = GrandBuilderConfig.get();
-		if (!config.allowExternalStructures) {
-			return Map.of();
-		}
-
-		Map<String, ExternalStructure> result = new HashMap<>();
-		ensureStructuresDirectory();
-
-		Map<String, List<PieceWithOffset>> groupedPieces = new HashMap<>();
-		List<ParsedPiece> singlePieces = new ArrayList<>();
-		int[] filesSeen = {0};
-
-		for (Path directory : structureDirectories()) {
+	private static Map<String, ExternalSource> scanSources(List<Path> directories, int limit) {
+		Map<String, ExternalSource> result = new LinkedHashMap<>();
+		Map<String, List<FileStamp>> groups = new LinkedHashMap<>();
+		int remaining = limit;
+		for (Path directory : directories) {
+			if (!Files.isDirectory(directory)) continue;
 			try (var stream = Files.list(directory)) {
-				stream.forEach(path -> {
-					if (filesSeen[0] >= config.maxExternalStructureFiles) {
-						return;
-					}
-
+				for (Path path : stream.sorted().toList()) {
+					if (remaining <= 0) break;
 					if (Files.isDirectory(path)) {
-						addExternal(result, loadDirectoryPack(path));
-						return;
+						try (var files = Files.walk(path, 16)) {
+							List<FileStamp> stamps = new ArrayList<>();
+							for (Path file : files.filter(Files::isRegularFile).filter(StructureLibrary::isSupportedStructureFile)
+								.limit(remaining).toList()) stamps.add(stamp(file));
+							stamps.sort(Comparator.comparing(file -> file.path().toString()));
+							remaining -= stamps.size();
+							if (!stamps.isEmpty()) addSource(result, path.getFileName().toString(), stamps, true);
+						}
+					} else if (Files.isRegularFile(path) && isSupportedStructureFile(path)) {
+						remaining--;
+						FileStamp file = stamp(path);
+						String name = baseName(path.getFileName().toString());
+						OffsetToken offset = safeOffsetToken(name);
+						if (offset == null) addSource(result, name, List.of(file), false);
+						else groups.computeIfAbsent(offset.groupName(), ignored -> new ArrayList<>()).add(file);
 					}
+				}
+			} catch (IOException exception) { LOGGER.warn("Unable to list structures in {}", directory, exception); }
+		}
+		for (var entry : groups.entrySet()) {
+			List<FileStamp> files = entry.getValue();
+			addSource(result, files.size() == 1 ? baseName(files.get(0).path().getFileName().toString()) : entry.getKey() + " (multi)",
+				files, files.size() > 1);
+		}
+		return Collections.unmodifiableMap(result);
+	}
 
-					if (!Files.isRegularFile(path) || !isSupportedStructureFile(path)) {
-						return;
-					}
-					filesSeen[0]++;
+	private static FileStamp stamp(Path path) throws IOException {
+		BasicFileAttributes attrs = Files.readAttributes(path, BasicFileAttributes.class);
+		return new FileStamp(path, attrs.size(), attrs.lastModifiedTime());
+	}
 
-					ParsedPiece piece = parsePiece(path);
-					if (piece == null || piece.blocks().isEmpty()) {
-						LOGGER.warn("Skipped structure file {} because it could not be parsed or contained no blocks", path);
-						return;
-					}
+	private static OffsetToken safeOffsetToken(String name) {
+		try { return parseOffsetToken(name); }
+		catch (NumberFormatException exception) { return null; }
+	}
 
-					OffsetToken offset = parseOffsetToken(piece.baseName());
-					if (offset == null) {
-						singlePieces.add(piece);
-						return;
-					}
+	private static void addSource(Map<String, ExternalSource> result, String name, List<FileStamp> files, boolean pack) {
+		String token = normalizeSourceToken(name), base = "file:" + token, key = base;
+		for (int suffix = 2; result.containsKey(key); suffix++) key = base + "_" + suffix;
+		result.put(key, new ExternalSource(key, prettifyExternalStructureName(name), token, name, List.copyOf(files), pack));
+	}
 
-					groupedPieces.computeIfAbsent(offset.groupName(), ignored -> new ArrayList<>())
-						.add(new PieceWithOffset(piece, offset));
-				});
-			} catch (IOException exception) {
-				LOGGER.warn("Unable to read structures directory: {}", directory, exception);
+	private static ExternalStructure loadSource(ExternalSource source) throws IOException {
+		ExternalStructure structure;
+		if (!source.pack()) {
+			Path file = source.files().get(0).path();
+			String extension = extensionOf(file.getFileName().toString());
+			CompoundTag root = unwrapStructureRoot(readNbtAuto(file), extension);
+			if (isSponge(root, extension)) {
+				DenseStructureBlueprint blueprint = denseSponge(root, source.sourceToken().startsWith("world_"));
+				structure = new ExternalStructure(source.key(), source.displayName(),
+					spawnDistance(blueprint.width(), blueprint.height(), blueprint.depth()), blueprint, source.sourceToken());
+			} else {
+				ParsedPiece piece = parsePiece(root, extension, source.sourceName());
+				structure = piece == null ? null : buildExternalStructure(source.sourceName(), piece.blocks());
 			}
-		}
-
-		for (Map.Entry<String, List<PieceWithOffset>> entry : groupedPieces.entrySet()) {
-			List<PieceWithOffset> pieces = entry.getValue();
-			if (pieces.size() < 2) {
-				singlePieces.add(pieces.get(0).piece());
-				continue;
+		} else {
+			List<RawBlock> plain = new ArrayList<>();
+			List<PieceWithOffset> offsets = new ArrayList<>();
+			int positions = 0;
+			for (FileStamp file : source.files()) {
+				ParsedPiece piece = parsePiece(file.path());
+				if (piece == null) throw new IOException("Unreadable structure pack piece: " + file.path());
+				positions = Math.addExact(positions, piece.blocks().size());
+				checkMaterializedCount(positions);
+				OffsetToken offset = safeOffsetToken(piece.baseName());
+				if (offset == null) plain.addAll(piece.blocks());
+				else offsets.add(new PieceWithOffset(piece, offset));
 			}
-
-			String sourceName = entry.getKey() + " (multi)";
-			addExternal(result, buildExternalStructure(sourceName, combineOffsetPieces(pieces)));
+			plain.addAll(combineOffsetPieces(offsets));
+			structure = buildExternalStructure(source.sourceName(), dedupeByPosition(plain));
 		}
+		return structure == null ? null : new ExternalStructure(source.key(), source.displayName(), structure.spawnDistance(),
+			structure.blueprint(), source.sourceToken());
+	}
 
-		for (ParsedPiece piece : singlePieces) {
-			addExternal(result, buildExternalStructure(piece.baseName(), piece.blocks()));
+	private static int spawnDistance(int width, int height, int depth) {
+		GrandBuilderConfig config = GrandBuilderConfig.get();
+		int horizontal = Math.max(10, Math.max(width, depth) / 2 + config.spawnDistancePadding);
+		horizontal = Math.max(config.minSpawnDistance, Math.min(config.maxSpawnDistance, horizontal));
+		return Math.max(horizontal, Math.min(config.maxSpawnDistance, Math.max(config.minSpawnDistance, height / 2 + 8)));
+	}
+
+	private static boolean isSponge(CompoundTag root, String extension) {
+		return (extension.equals(".schem") || extension.equals(".schematic"))
+			&& (!root.getCompoundOrEmpty("Palette").isEmpty() || !root.getCompoundOrEmpty("Blocks").getCompoundOrEmpty("Palette").isEmpty());
+	}
+
+	static DenseStructureBlueprint denseSponge(CompoundTag root, boolean preserveCrop) throws IOException {
+		CompoundTag section = root.getCompoundOrEmpty("Blocks");
+		CompoundTag paletteTag = root.getCompoundOrEmpty("Palette");
+		byte[] data = getByteArrayOrEmpty(root, "BlockData");
+		if (paletteTag.isEmpty() || data.length == 0) {
+			paletteTag = section.getCompoundOrEmpty("Palette");
+			data = getByteArrayOrEmpty(section, "BlockData");
+			if (data.length == 0) data = getByteArrayOrEmpty(section, "Data");
 		}
-
-		if (filesSeen[0] >= config.maxExternalStructureFiles) {
-			LOGGER.warn("External structure scan limit reached ({} files). Increase maxExternalStructureFiles in config if needed.", config.maxExternalStructureFiles);
+		Map<Integer, BlockState> palette = new HashMap<>();
+		for (String state : paletteTag.keySet()) {
+			int id = paletteTag.getIntOr(state, -1);
+			if (id < 0 || palette.put(id, readBlockStateFromString(state)) != null) throw new IOException("Invalid or duplicate palette ID");
 		}
+		ListTag tags = root.getListOrEmpty("BlockEntities");
+		if (tags.isEmpty()) tags = section.getListOrEmpty("BlockEntities");
+		Map<Long, CompoundTag> entities = new it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<>();
+		readBlockEntityMap(tags, 0, 0, 0, false).forEach((pos, tag) -> entities.put(BlockPos.asLong(pos.x(), pos.y(), pos.z()), tag));
+		return DenseStructureBlueprint.sponge(root.getIntOr("Width", 0), root.getIntOr("Height", 0),
+			root.getIntOr("Length", 0), palette, data, entities, preserveCrop, MAX_DENSE_POSITIONS);
+	}
 
-		return result;
+	public static int countNonAir(List<GrandPalaceBlueprint.RelativeBlock> blueprint) {
+		if (blueprint instanceof DenseStructureBlueprint dense) return dense.nonAirCount();
+		int count = 0;
+		for (var block : blueprint) if (!block.state().isAir()) count++;
+		return count;
+	}
+
+	static List<GrandPalaceBlueprint.RelativeBlock> boundaryBlocks(List<GrandPalaceBlueprint.RelativeBlock> blueprint) {
+		return blueprint instanceof DenseStructureBlueprint dense ? dense.boundaryBlocks() : blueprint;
+	}
+
+	private static void checkMaterializedCount(int count) throws IOException {
+		int limit = (int)Math.min(MAX_MATERIALIZED_POSITIONS, Runtime.getRuntime().maxMemory() / 512);
+		if (count > limit) throw new IOException("Structure format/pack exceeds safe object decode limit of " + limit + "; use a single Sponge .schem");
 	}
 
 	private static List<Path> structureDirectories() {
 		List<Path> directories = new ArrayList<>(2);
-		directories.add(PRIMARY_STRUCTURES_DIR);
-		if (SHARED_STRUCTURES_DIR != null && !SHARED_STRUCTURES_DIR.equals(PRIMARY_STRUCTURES_DIR)) {
-			directories.add(SHARED_STRUCTURES_DIR);
+		directories.add(Directories.PRIMARY);
+		if (Directories.SHARED != null && !Directories.SHARED.equals(Directories.PRIMARY)) {
+			directories.add(Directories.SHARED);
 		}
 		return directories;
 	}
@@ -315,63 +415,17 @@ public final class StructureLibrary {
 		return minecraftDir == null ? null : minecraftDir.resolve("grand_builder").resolve("structures");
 	}
 
-	private static ExternalStructure loadDirectoryPack(Path directory) {
-		GrandBuilderConfig config = GrandBuilderConfig.get();
-		List<PieceWithOffset> offsetPieces = new ArrayList<>();
-		List<RawBlock> plainBlocks = new ArrayList<>();
-		int[] scanned = {0};
-
-		try (var stream = Files.walk(directory)) {
-			stream
-				.filter(Files::isRegularFile)
-				.filter(StructureLibrary::isSupportedStructureFile)
-				.forEach(path -> {
-					if (scanned[0] >= config.maxExternalStructureFiles) {
-						return;
-					}
-
-					scanned[0]++;
-					ParsedPiece piece = parsePiece(path);
-					if (piece == null || piece.blocks().isEmpty()) {
-						return;
-					}
-
-					OffsetToken offset = parseOffsetToken(piece.baseName());
-					if (offset != null) {
-						offsetPieces.add(new PieceWithOffset(piece, offset));
-						return;
-					}
-
-					plainBlocks.addAll(piece.blocks());
-				});
-		} catch (IOException exception) {
-			LOGGER.warn("Unable to read structure pack directory: {}", directory, exception);
-			return null;
-		}
-
-		List<RawBlock> combined = new ArrayList<>(plainBlocks);
-		combined.addAll(combineOffsetPieces(offsetPieces));
-		if (combined.isEmpty()) {
-			return null;
-		}
-
-		String displayName = directory.getFileName() != null
-			? directory.getFileName().toString()
-			: directory.toString();
-		return buildExternalStructure(displayName, dedupeByPosition(combined));
-	}
-
 	private static List<RawBlock> combineOffsetPieces(List<PieceWithOffset> pieces) {
 		List<RawBlock> combined = new ArrayList<>();
 		for (PieceWithOffset piece : pieces) {
-			int offsetX = piece.offset().gridUnits() ? piece.offset().x() * MULTI_NBT_STRIDE : piece.offset().x();
-			int offsetY = piece.offset().gridUnits() ? piece.offset().y() * MULTI_NBT_STRIDE : piece.offset().y();
-			int offsetZ = piece.offset().gridUnits() ? piece.offset().z() * MULTI_NBT_STRIDE : piece.offset().z();
+			int offsetX = piece.offset().gridUnits() ? Math.multiplyExact(piece.offset().x(), MULTI_NBT_STRIDE) : piece.offset().x();
+			int offsetY = piece.offset().gridUnits() ? Math.multiplyExact(piece.offset().y(), MULTI_NBT_STRIDE) : piece.offset().y();
+			int offsetZ = piece.offset().gridUnits() ? Math.multiplyExact(piece.offset().z(), MULTI_NBT_STRIDE) : piece.offset().z();
 			for (RawBlock block : piece.piece().blocks()) {
 				combined.add(new RawBlock(
-					block.x() + offsetX,
-					block.y() + offsetY,
-					block.z() + offsetZ,
+					Math.addExact(block.x(), offsetX),
+					Math.addExact(block.y(), offsetY),
+					Math.addExact(block.z(), offsetZ),
 					block.state(),
 					copyNbt(block.blockEntityNbt())
 				));
@@ -401,51 +455,19 @@ public final class StructureLibrary {
 		return new ArrayList<>(byPos.values());
 	}
 
-	private static void addExternal(Map<String, ExternalStructure> result, ExternalStructure structure) {
-		if (structure == null) {
-			return;
-		}
-
-		String baseKey = structure.key();
-		String key = baseKey;
-		int suffix = 2;
-		while (result.containsKey(key)) {
-			key = baseKey + "_" + suffix;
-			suffix++;
-		}
-
-		if (key.equals(baseKey)) {
-			result.put(key, structure);
-			return;
-		}
-
-		result.put(key, new ExternalStructure(
-			key,
-			structure.displayName(),
-			structure.spawnDistance(),
-			structure.blueprint(),
-			structure.sourceToken()
-		));
+	private static ParsedPiece parsePiece(Path path) throws IOException {
+		String filename = path.getFileName().toString(), extension = extensionOf(filename);
+		return parsePiece(unwrapStructureRoot(readNbtAuto(path), extension), extension, baseName(filename));
 	}
 
-	private static ParsedPiece parsePiece(Path path) {
-		try {
-			String filename = path.getFileName().toString();
-			String baseName = baseName(filename);
-			String extension = extensionOf(filename);
-			CompoundTag root = unwrapStructureRoot(readNbtAuto(path), extension);
-			ParsedPiece parsed = switch (extension) {
-				case ".nbt" -> parseVanillaStructure(root, baseName);
-				case ".schem" -> parseSpongeStructure(root, baseName);
-				case ".schematic" -> parseSchematicStructure(root, baseName);
-				case ".litematic" -> parseLitematicStructure(root, baseName);
-				default -> null;
-			};
-			return parsed;
-		} catch (Exception exception) {
-			LOGGER.warn("Unable to load structure from {}", path, exception);
-			return null;
-		}
+	private static ParsedPiece parsePiece(CompoundTag root, String extension, String name) throws IOException {
+		return switch (extension) {
+			case ".nbt" -> parseVanillaStructure(root, name);
+			case ".schem" -> parseSpongeStructure(root, name);
+			case ".schematic" -> parseSchematicStructure(root, name);
+			case ".litematic" -> parseLitematicStructure(root, name);
+			default -> null;
+		};
 	}
 
 	private static CompoundTag unwrapStructureRoot(CompoundTag root, String extension) {
@@ -466,15 +488,20 @@ public final class StructureLibrary {
 		return root;
 	}
 
-	private static CompoundTag readNbtAuto(Path path) throws IOException {
-		try {
-			return NbtIo.readCompressed(path, NbtAccounter.unlimitedHeap());
-		} catch (IOException compressedException) {
-			return NbtIo.read(path);
+	static CompoundTag readNbtAuto(Path path) throws IOException {
+		long budget = Math.min(128L * 1024 * 1024, Runtime.getRuntime().maxMemory() / 16);
+		try (var input = new BufferedInputStream(Files.newInputStream(path))) {
+			input.mark(2);
+			boolean gzip = input.read() == 0x1f && input.read() == 0x8b;
+			input.reset();
+			NbtAccounter accounter = NbtAccounter.create(budget);
+			return gzip ? NbtIo.readCompressed(input, accounter) : NbtIo.read(new DataInputStream(input), accounter);
+		} catch (net.minecraft.nbt.NbtAccounterException exception) {
+			throw new IOException("Structure NBT exceeds the safe read budget", exception);
 		}
 	}
 
-	private static ParsedPiece parseVanillaStructure(CompoundTag root, String baseName) {
+	private static ParsedPiece parseVanillaStructure(CompoundTag root, String baseName) throws IOException {
 		ListTag paletteTag = root.getListOrEmpty("palette");
 		ListTag blocksTag = root.getListOrEmpty("blocks");
 		if (paletteTag.isEmpty() || blocksTag.isEmpty()) {
@@ -486,6 +513,7 @@ public final class StructureLibrary {
 			palette.add(readBlockState(paletteTag.getCompoundOrEmpty(i)));
 		}
 
+		checkMaterializedCount(blocksTag.size());
 		List<RawBlock> blocks = new ArrayList<>();
 		for (int i = 0; i < blocksTag.size(); i++) {
 			CompoundTag blockTag = blocksTag.getCompoundOrEmpty(i);
@@ -510,7 +538,7 @@ public final class StructureLibrary {
 		return new ParsedPiece(baseName, blocks);
 	}
 
-	private static ParsedPiece parseSpongeStructure(CompoundTag root, String baseName) {
+	private static ParsedPiece parseSpongeStructure(CompoundTag root, String baseName) throws IOException {
 		int sizeX = root.getIntOr("Width", 0);
 		int sizeY = root.getIntOr("Height", 0);
 		int sizeZ = root.getIntOr("Length", 0);
@@ -541,7 +569,8 @@ public final class StructureLibrary {
 			palette.put(id, readBlockStateFromString(key));
 		}
 
-		int total = sizeX * sizeY * sizeZ;
+		int total = DenseStructureBlueprint.checkedVolume(sizeX, sizeY, sizeZ, MAX_MATERIALIZED_POSITIONS);
+		checkMaterializedCount(total);
 		int[] indexes = decodeVarInts(blockData, total);
 		ListTag blockEntityList = root.getListOrEmpty("BlockEntities");
 		if (blockEntityList.isEmpty() && !blocksSection.isEmpty()) {
@@ -568,7 +597,7 @@ public final class StructureLibrary {
 		return new ParsedPiece(baseName, blocks);
 	}
 
-	private static ParsedPiece parseSchematicStructure(CompoundTag root, String baseName) {
+	private static ParsedPiece parseSchematicStructure(CompoundTag root, String baseName) throws IOException {
 		CompoundTag spongePalette = root.getCompoundOrEmpty("Palette");
 		byte[] spongeData = getByteArrayOrEmpty(root, "BlockData");
 		CompoundTag spongeBlocks = root.getCompoundOrEmpty("Blocks");
@@ -615,7 +644,9 @@ public final class StructureLibrary {
 			return null;
 		}
 
-		int total = Math.min(blocksArray.length, sizeX * sizeY * sizeZ);
+		int total = DenseStructureBlueprint.checkedVolume(sizeX, sizeY, sizeZ, MAX_MATERIALIZED_POSITIONS);
+		checkMaterializedCount(total);
+		if (blocksArray.length != total) throw new IOException("Legacy schematic block data is truncated");
 		Map<Vec3i, CompoundTag> blockEntities = readBlockEntityMap(root.getListOrEmpty("TileEntities"), 0, 0, 0, false);
 		List<RawBlock> blocks = new ArrayList<>();
 
@@ -645,7 +676,7 @@ public final class StructureLibrary {
 		return new ParsedPiece(baseName, blocks);
 	}
 
-	private static ParsedPiece parseLitematicStructure(CompoundTag root, String baseName) {
+	private static ParsedPiece parseLitematicStructure(CompoundTag root, String baseName) throws IOException {
 		CompoundTag regions = root.getCompoundOrEmpty("Regions");
 		if (regions.isEmpty()) {
 			return null;
@@ -667,9 +698,11 @@ public final class StructureLibrary {
 			int rawSizeX = size.x();
 			int rawSizeY = size.y();
 			int rawSizeZ = size.z();
-			int sizeX = Math.max(1, Math.abs(rawSizeX));
-			int sizeY = Math.max(1, Math.abs(rawSizeY));
-			int sizeZ = Math.max(1, Math.abs(rawSizeZ));
+			if (rawSizeX == Integer.MIN_VALUE || rawSizeY == Integer.MIN_VALUE || rawSizeZ == Integer.MIN_VALUE)
+				throw new IOException("Litematic dimensions overflow");
+			int sizeX = Math.abs(rawSizeX);
+			int sizeY = Math.abs(rawSizeY);
+			int sizeZ = Math.abs(rawSizeZ);
 
 			int posX = position.x();
 			int posY = position.y();
@@ -685,7 +718,9 @@ public final class StructureLibrary {
 			}
 
 			int bits = bitsRequired(palette.size());
-			int total = sizeX * sizeY * sizeZ;
+			int total = DenseStructureBlueprint.checkedVolume(sizeX, sizeY, sizeZ, MAX_MATERIALIZED_POSITIONS);
+			checkMaterializedCount(Math.addExact(blocks.size(), total));
+			if ((long)packedStates.length * 64 < (long)total * bits) throw new IOException("Litematic block data is truncated");
 			for (int index = 0; index < total; index++) {
 				int paletteIndex = readPackedIndex(packedStates, bits, index);
 				if (paletteIndex < 0 || paletteIndex >= palette.size()) {
@@ -794,20 +829,20 @@ public final class StructureLibrary {
 		);
 	}
 
-	private static List<ExternalStructure> sortedExternalStructures(Iterable<ExternalStructure> source) {
-		List<ExternalStructure> sorted = new ArrayList<>();
-		for (ExternalStructure structure : source) {
+	private static List<ExternalSource> sortedExternalSources(Iterable<ExternalSource> source) {
+		List<ExternalSource> sorted = new ArrayList<>();
+		for (ExternalSource structure : source) {
 			sorted.add(structure);
 		}
 		sorted.sort(
 			Comparator
 				.comparingInt(StructureLibrary::externalOrderIndex)
-				.thenComparing(ExternalStructure::displayName, String::compareToIgnoreCase)
+				.thenComparing(ExternalSource::displayName, String::compareToIgnoreCase)
 		);
 		return sorted;
 	}
 
-	private static int externalOrderIndex(ExternalStructure structure) {
+	private static int externalOrderIndex(ExternalSource structure) {
 		int index = EXTERNAL_DEFAULT_ORDER.indexOf(structure.sourceToken());
 		return index >= 0 ? index : Integer.MAX_VALUE;
 	}
@@ -1002,7 +1037,7 @@ public final class StructureLibrary {
 		return (int) (value & mask);
 	}
 
-	private static int[] decodeVarInts(byte[] input, int expectedCount) {
+	private static int[] decodeVarInts(byte[] input, int expectedCount) throws IOException {
 		int[] output = new int[expectedCount];
 		int outputIndex = 0;
 		int cursor = 0;
@@ -1013,10 +1048,11 @@ public final class StructureLibrary {
 			byte current;
 			do {
 				if (cursor >= input.length || shift > 28) {
-					return output;
+					throw new IOException("Truncated or oversized schematic VarInt");
 				}
 
 				current = input[cursor++];
+				if (shift == 28 && (current & 0xF8) != 0) throw new IOException("Invalid schematic VarInt");
 				value |= (current & 0x7F) << shift;
 				shift += 7;
 			} while ((current & 0x80) != 0);
@@ -1024,6 +1060,7 @@ public final class StructureLibrary {
 			output[outputIndex++] = value;
 		}
 
+		if (outputIndex != expectedCount || cursor != input.length) throw new IOException("Schematic block data length does not match dimensions");
 		return output;
 	}
 
@@ -1213,7 +1250,7 @@ public final class StructureLibrary {
 
 	private static int stageFor(int x, int y, int z) {
 		int wave = Math.floorMod(x * 5 - z * 3, 11);
-		int radial = (int) Math.round(Math.sqrt(x * x + z * z) * 8);
+		int radial = (int) Math.round(Math.hypot(x, z) * 8);
 		return y * 120 + radial + wave;
 	}
 
@@ -1266,7 +1303,9 @@ public final class StructureLibrary {
 	) {
 	}
 
-	private record ExternalStructure(
+	record FileStamp(Path path, long size, java.nio.file.attribute.FileTime modified) {}
+	record ExternalSource(String key, String displayName, String sourceToken, String sourceName, List<FileStamp> files, boolean pack) {}
+	record ExternalStructure(
 		String key,
 		String displayName,
 		int spawnDistance,

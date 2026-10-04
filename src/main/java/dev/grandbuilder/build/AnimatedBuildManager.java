@@ -120,7 +120,7 @@ public final class AnimatedBuildManager {
 		int count = 0;
 		if (available) {
 			if (mode == BuildEffectMode.DISMANTLE) {
-				for (GrandPalaceBlueprint.RelativeBlock block : blocks) if (!block.state().isAir()) count++;
+				count = StructureLibrary.countNonAir(blocks);
 			} else count = blocks.size();
 		}
 		long ticks = available ? estimateTicks(count, BuildSpeed.byNetworkId(selected.speedId()), mode, options) : 0;
@@ -129,7 +129,8 @@ public final class AnimatedBuildManager {
 	}
 
 	public static String getSelectionKey(UUID playerId) {
-		return SELECTION_KEY_BY_PLAYER.getOrDefault(playerId, StructureLibrary.defaultSelectionEntry().key());
+		String selected = SELECTION_KEY_BY_PLAYER.get(playerId);
+		return selected != null ? selected : StructureLibrary.defaultSelectionEntry().key();
 	}
 
 	public static boolean isTerrainAdaptationEnabled(UUID playerId) {
@@ -989,10 +990,10 @@ public final class AnimatedBuildManager {
 		}
 
 		if (blueprint == null || blueprint.isEmpty()) {
-			player.displayClientMessage(Component.translatable("message.grand_builder.custom_missing"), true);
+			player.displayClientMessage(Component.translatable("message.grand_builder.structure_load_failed", resolved.displayName()), true);
 			return null;
 		}
-		return new SelectionData(resolved, new ArrayList<>(blueprint));
+		return new SelectionData(resolved, blueprint);
 	}
 
 	private static BuildJob createBuildJob(
@@ -1828,7 +1829,7 @@ public final class AnimatedBuildManager {
 		int maxY = Integer.MIN_VALUE;
 		int maxZ = Integer.MIN_VALUE;
 
-		for (GrandPalaceBlueprint.RelativeBlock block : blocks) {
+		for (GrandPalaceBlueprint.RelativeBlock block : StructureLibrary.boundaryBlocks(blocks)) {
 			BlockPos transformed = transform(anchor, facing, block);
 			minX = Math.min(minX, transformed.getX());
 			minY = Math.min(minY, transformed.getY());

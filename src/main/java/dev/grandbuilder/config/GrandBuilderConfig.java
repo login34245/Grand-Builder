@@ -28,7 +28,9 @@ import net.minecraft.world.level.Level;
 
 public final class GrandBuilderConfig {
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
-	private static final Path CONFIG_PATH = FabricLoader.getInstance().getConfigDir().resolve("grand_builder.json");
+	private static final class ConfigFile {
+		static final Path PATH = FabricLoader.getInstance().getConfigDir().resolve("grand_builder.json");
+	}
 
 	private static volatile GrandBuilderConfig current = defaults();
 
@@ -95,11 +97,11 @@ public final class GrandBuilderConfig {
 
 	public static synchronized void load() {
 		GrandBuilderConfig next = null;
-		if (Files.exists(CONFIG_PATH)) {
-			try (Reader reader = Files.newBufferedReader(CONFIG_PATH, StandardCharsets.UTF_8)) {
+		if (Files.exists(ConfigFile.PATH)) {
+			try (Reader reader = Files.newBufferedReader(ConfigFile.PATH, StandardCharsets.UTF_8)) {
 				next = GSON.fromJson(reader, GrandBuilderConfig.class);
 			} catch (Exception exception) {
-				GrandBuilderMod.LOGGER.warn("Failed to read config {}, using defaults", CONFIG_PATH, exception);
+				GrandBuilderMod.LOGGER.warn("Failed to read config {}, using defaults", ConfigFile.PATH, exception);
 			}
 		}
 
@@ -121,7 +123,7 @@ public final class GrandBuilderConfig {
 	}
 
 	public static Path configPath() {
-		return CONFIG_PATH;
+		return ConfigFile.PATH;
 	}
 
 	public boolean hasPermission(ServerPlayer player) {
@@ -267,12 +269,12 @@ public final class GrandBuilderConfig {
 
 	private static synchronized void writeCurrent() {
 		try {
-			Files.createDirectories(CONFIG_PATH.getParent());
-			try (Writer writer = Files.newBufferedWriter(CONFIG_PATH, StandardCharsets.UTF_8)) {
+			Files.createDirectories(ConfigFile.PATH.getParent());
+			try (Writer writer = Files.newBufferedWriter(ConfigFile.PATH, StandardCharsets.UTF_8)) {
 				GSON.toJson(current, writer);
 			}
 		} catch (IOException exception) {
-			GrandBuilderMod.LOGGER.warn("Failed to write config {}", CONFIG_PATH, exception);
+			GrandBuilderMod.LOGGER.warn("Failed to write config {}", ConfigFile.PATH, exception);
 		}
 	}
 

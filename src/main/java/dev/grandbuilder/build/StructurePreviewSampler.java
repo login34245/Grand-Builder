@@ -21,14 +21,22 @@ public final class StructurePreviewSampler {
 		int minX = Integer.MAX_VALUE, minY = Integer.MAX_VALUE, minZ = Integer.MAX_VALUE;
 		int maxX = Integer.MIN_VALUE, maxY = Integer.MIN_VALUE, maxZ = Integer.MIN_VALUE;
 		int stride = Math.max(1, (blocks.size() + 999999) / 1000000);
-		for (int index = 0; index < blocks.size(); index++) {
-			GrandPalaceBlueprint.RelativeBlock block = blocks.get(index);
+		for (GrandPalaceBlueprint.RelativeBlock block : StructureLibrary.boundaryBlocks(blocks)) {
 			BlockPos target = AnimatedBuildManager.transform(origin, facing, block);
 			minX = Math.min(minX, target.getX()); maxX = Math.max(maxX, target.getX());
 			minY = Math.min(minY, target.getY()); maxY = Math.max(maxY, target.getY());
 			minZ = Math.min(minZ, target.getZ()); maxZ = Math.max(maxZ, target.getZ());
-			if (index % stride == 0 && !block.state().isAir())
+		}
+		// Huge mostly-air files should spend the visual budget on solid blocks, not empty cells.
+		List<GrandPalaceBlueprint.RelativeBlock> sample = blocks instanceof DenseStructureBlueprint dense
+			? dense.sampleNonAir(1_000_000) : blocks;
+		if (sample != blocks) stride = 1;
+		for (int index = 0; index < sample.size(); index += stride) {
+			GrandPalaceBlueprint.RelativeBlock block = sample.get(index);
+			if (!block.state().isAir()) {
+				BlockPos target = AnimatedBuildManager.transform(origin, facing, block);
 				visible.put(target.asLong(), AnimatedBuildManager.rotateState(block.state(), facing));
+			}
 		}
 		if (blocks.isEmpty()) return new StructurePreviewPayload(kind, false, dimension, origin, origin, List.of());
 		return fromStates(kind, dimension, new BlockPos(minX,minY,minZ), new BlockPos(maxX,maxY,maxZ), visible);
