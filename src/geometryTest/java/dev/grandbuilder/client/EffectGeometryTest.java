@@ -68,6 +68,7 @@ public final class EffectGeometryTest {
 		verifyReplacementOptions();
 		verifyDismantleConnections();
 		verifyOrbitalStrike();
+		verifySetChange();
 		verifyBuildDirections();
 		verifyCadence();
 		verifyKinetic();
@@ -110,6 +111,70 @@ public final class EffectGeometryTest {
 			orbit.zoom(-100);
 			check(orbit.pose(center,40,260,40,screen[0],screen[1],screen[2],70).position().distanceTo(center)<=480.001, "Zoom makes preview disappear");
 		}
+	}
+
+	private static void verifySetChange() {
+		check(BuildEffectMode.SET_CHANGE.networkId() == 16 && BuildEffectMode.SET_CHANGE.setupTicks() == 96
+			&& BuildEffectMode.SET_CHANGE.aftermathTicks() == 80 && !BuildEffectMode.SET_CHANGE.hidesSpeed(), "Cinematic timing or mode IDs changed");
+		for (int phase : new int[] {BuildEffectPayload.PHASE_BUILD, BuildEffectPayload.PHASE_REVEAL})
+			for (float age : new float[] {10, 42, 70, 96, 120, 360}) for (double size : new double[] {1, 20, 256})
+				for (int[] viewport : new int[][] {{1280,720}, {720,1280}, {640,360}, {320,180}}) {
+					var f = new GrandBuilderClientEffects.Frame(BuildEffectMode.SET_CHANGE,phase,age,age,80,0.5f,1,
+						12,64,-30,size,size*0.75,size*0.8);
+					var pose = CinematicCamera.pose(f,viewport[0],viewport[1],70);
+					check(Double.isFinite(pose.position().length()) && Float.isFinite(pose.yaw()) && Float.isFinite(pose.pitch())
+						&& Math.abs(pose.roll())<0.03, "Invalid cinematic shot");
+					int expected = phase == BuildEffectPayload.PHASE_REVEAL ? 3 : age < 42 ? 0 : age < 96 ? 1 : 2;
+					check(pose.index()==expected,"Cutscene skipped a shot");
+					double yaw=Math.toRadians(pose.yaw()), pitch=Math.toRadians(pose.pitch());
+					var forward=new net.minecraft.world.phys.Vec3(-Math.sin(yaw)*Math.cos(pitch),-Math.sin(pitch),Math.cos(yaw)*Math.cos(pitch));
+					var right=new net.minecraft.world.phys.Vec3(-Math.cos(yaw),0,-Math.sin(yaw));
+					var up=right.cross(forward);
+					for(double x:new double[]{-size/2,size/2}) for(double y:new double[]{0,size*0.75}) for(double z:new double[]{-size*0.4,size*0.4}) {
+						var delta=new net.minecraft.world.phys.Vec3(12+x,64+y,-30+z).subtract(pose.position());
+						double depth=delta.dot(forward), tangent=Math.tan(Math.toRadians(70)/2);
+						check(depth>0 && Math.abs(delta.dot(right)/depth)<tangent*viewport[0]/viewport[1]
+							&& Math.abs(delta.dot(up)/depth)<tangent*5/6,"Cinematic camera clips the structure or letterbox");
+					}
+				}
+		var payload=new BuildEffectPayload(java.util.UUID.randomUUID(),net.minecraft.resources.Identifier.fromNamespaceAndPath("minecraft","overworld"),
+			BlockPos.ZERO,new BlockPos(10,20,30),16,2,100,42,0.3f,0.5f,false,0,false,java.util.UUID.randomUUID());
+		var buffer=new RegistryFriendlyByteBuf(Unpooled.buffer(),RegistryAccess.EMPTY);
+		try { BuildEffectPayload.CODEC.encode(buffer,payload); check(BuildEffectPayload.CODEC.decode(buffer).equals(payload)
+			&& !buffer.isReadable(),"Scene codec lost the camera owner"); } finally { buffer.release(); }
+		verifyCinematicOwnership();
+		System.out.println("Set Change verified: 4 cinematic shots, portrait/wide framing, bounded textured poses, timing and owner codec.");
+	}
+
+	@SuppressWarnings("unchecked")
+	private static void verifyCinematicOwnership() {
+		try {
+			var field = GrandBuilderClientEffects.class.getDeclaredField("SCENES"); field.setAccessible(true);
+			var scenes = (java.util.Map<java.util.UUID, Object>) field.get(null);
+			var saved = new java.util.LinkedHashMap<>(scenes);
+			var constructor = Class.forName("dev.grandbuilder.client.GrandBuilderClientEffects$Scene").getDeclaredConstructor(BuildEffectPayload.class);
+			constructor.setAccessible(true);
+			var owner = java.util.UUID.randomUUID();
+			var dimension = net.minecraft.resources.Identifier.fromNamespaceAndPath("minecraft", "overworld");
+			try {
+				scenes.clear();
+				var outro = new BuildEffectPayload(java.util.UUID.randomUUID(), dimension, BlockPos.ZERO, new BlockPos(1,1,1),
+					16, BuildEffectPayload.PHASE_REVEAL, 80, 20, 1, 1, false, 0, false, owner);
+				scenes.put(outro.sceneId(), constructor.newInstance(outro));
+				for (int[] modePhase : new int[][] {{16,2}, {16,3}, {16,4}, {11,2}}) {
+					var latest = new BuildEffectPayload(java.util.UUID.randomUUID(), dimension, new BlockPos(100,0,0), new BlockPos(101,1,1),
+						modePhase[0], modePhase[1], 100, 20, 0.2f, 1, false, 0, false, owner);
+					scenes.put(latest.sceneId(), constructor.newInstance(latest));
+					var selected = GrandBuilderClientEffects.cinematicFrame(0, owner);
+					check(modePhase[0] == 16 && modePhase[1] == 2 ? selected != null && selected.x() == 101 : selected == null,
+						"Previous outro reclaimed the camera from the latest build");
+					check(GrandBuilderClientEffects.cinematicFrame(0, java.util.UUID.randomUUID()) == null, "Nonowner cinematic camera");
+					scenes.remove(latest.sceneId());
+				}
+				GrandBuilderClientEffects.dismissCinematic(owner);
+				check(GrandBuilderClientEffects.cinematicFrame(0, owner) == null, "Dismissed camera resumed");
+			} finally { scenes.clear(); scenes.putAll(saved); }
+		} catch (ReflectiveOperationException exception) { throw new AssertionError("Cinematic ownership regression", exception); }
 	}
 
 	private static void verifyDismantleConnections() {

@@ -67,9 +67,9 @@ public final class StructureSelectionScreen extends Screen {
 		BuilderTheme theme = BuilderTheme.current();
 		graphics.fillGradient(0, 0, width, height, theme.backdropTop, theme.backdropBottom);
 		graphics.fillGradient(left, 6, left + panelWidth, height - 6, theme.panelTop, theme.panelBottom);
-		graphics.drawCenteredString(font, title, width / 2, 14, theme.text);
+		ThemeText.centered(graphics, font, title, width / 2, 14, theme.text);
 		super.render(graphics, mouseX, mouseY, partialTick);
-		if (rows.children().isEmpty()) graphics.drawCenteredString(font,
+		if (rows.children().isEmpty()) ThemeText.centered(graphics, font,
 			Component.translatable("screen.grand_builder.settings.no_results"), width / 2, height / 2, theme.muted);
 	}
 	@Override public void onClose() { minecraft.setScreen(parent); }
@@ -84,6 +84,11 @@ public final class StructureSelectionScreen extends Screen {
 		@Override public int getRowWidth() { return getWidth() - 12; }
 		@Override protected void renderListBackground(GuiGraphics graphics) { }
 		@Override protected void renderListSeparators(GuiGraphics graphics) { }
+		@Override protected void renderSelection(GuiGraphics graphics, Row row, int color) {
+			if (BuilderTheme.current() != BuilderTheme.LIGHT) { super.renderSelection(graphics, row, color); return; }
+			graphics.fill(row.getX(), row.getY(), row.getX() + row.getWidth(), row.getY() + row.getHeight(), 0xFF486B64);
+			graphics.fill(row.getX() + 1, row.getY() + 1, row.getX() + row.getWidth() - 1, row.getY() + row.getHeight() - 1, 0xFFD2E2DC);
+		}
 		@Override public void renderWidget(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
 			super.renderWidget(graphics, mouseX, mouseY, partialTick);
 			Row hovered = getHovered();
@@ -103,7 +108,7 @@ public final class StructureSelectionScreen extends Screen {
 			if (hovered) graphics.fill(getContentX(), getContentY(), getContentRight(), getContentBottom(), theme.border & 0x55FFFFFF);
 			String name = entry.displayName().getString(); int size = getContentWidth() - 6;
 			if (font.width(name) > size) name = font.plainSubstrByWidth(name, size - 12) + "...";
-			graphics.drawString(font, name, getContentX() + 3, getContentY() + 5, theme.text);
+			ThemeText.draw(graphics, font, name, getContentX() + 3, getContentY() + 5, theme.text);
 		}
 		@Override public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
 			if (event.button() != 0) return false;

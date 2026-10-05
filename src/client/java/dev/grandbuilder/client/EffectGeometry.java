@@ -47,6 +47,7 @@ public final class EffectGeometry {
 			case AURORA_WEAVE -> aurora(mesh, frame);
 			case BUILDER_CHARGE -> builderCharge(mesh, frame);
 			case ORBITAL_STRIKE -> orbitalStrike(mesh, frame);
+			case SET_CHANGE -> SetChangeGeometry.emit(frame, mesh);
 			case REVERSE -> directional(mesh, frame);
 			case FLYING_BLOCKS, REVERSE_COLLAPSE, ASSEMBLY_WORKSHOP, SCALE_MODEL -> KineticGeometry.emit(frame, mesh);
 			default -> { }
@@ -802,7 +803,7 @@ public final class EffectGeometry {
 				quad(mat,new double[]{0,-y,0},p[(i+1)%4],p[i],p[i],shade(rgb,0.45+i*0.06),alpha);
 			}
 		}
-		private void rectangle(double x,double z,double r,int rgb,double alpha) {
+		void rectangle(double x,double z,double r,int rgb,double alpha) {
 			tube(-x,0,-z,x,0,-z,r,rgb,Material.GLOW,alpha); tube(x,0,-z,x,0,z,r,rgb,Material.GLOW,alpha);
 			tube(x,0,z,-x,0,z,r,rgb,Material.GLOW,alpha); tube(-x,0,z,-x,0,-z,r,rgb,Material.GLOW,alpha);
 		}

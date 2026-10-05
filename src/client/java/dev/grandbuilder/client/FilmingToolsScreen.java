@@ -100,14 +100,14 @@ public final class FilmingToolsScreen extends Screen {
 		BuilderTheme theme = BuilderTheme.current();
 		graphics.fill(left - 1, top - 1, left + panelWidth + 1, top + panelHeight + 1, theme.border);
 		graphics.fill(left, top, left + panelWidth, top + panelHeight, theme.panelTop);
-		graphics.drawCenteredString(font, title, width / 2, top + 9, theme.accent);
+		ThemeText.centered(graphics, font, title, width / 2, top + 9, theme.accent);
 		String info = feedbackTicks > 0 ? feedbackKey : state == null ? "screen.grand_builder.filming.loading"
 			: !state.permitted() ? "screen.grand_builder.filming.denied" : state.invisible()
 			? "screen.grand_builder.filming.invisible" : "screen.grand_builder.filming.visible";
 		String line = font.plainSubstrByWidth(Component.translatable(info).getString(), panelWidth - 24);
-		graphics.drawCenteredString(font, line, width / 2, top + 22, theme.muted);
-		graphics.drawString(font, Component.translatable("screen.grand_builder.filming.time"), left + 12, timeY - 11, theme.text);
-		graphics.drawString(font, Component.translatable("screen.grand_builder.filming.weather"), left + 12, weatherY - 11, theme.text);
+		ThemeText.centered(graphics, font, line, width / 2, top + 22, theme.muted);
+		ThemeText.draw(graphics, font, Component.translatable("screen.grand_builder.filming.time"), left + 12, timeY - 11, theme.text);
+		ThemeText.draw(graphics, font, Component.translatable("screen.grand_builder.filming.weather"), left + 12, weatherY - 11, theme.text);
 		super.render(graphics, mouseX, mouseY, partialTick);
 		if (state != null && state.permitted()) {
 			FilmingAction time = state.dayTime() < 3000 ? FilmingAction.DAWN : state.dayTime() < 10000 ? FilmingAction.DAY

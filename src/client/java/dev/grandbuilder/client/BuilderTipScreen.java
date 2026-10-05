@@ -60,11 +60,11 @@ public final class BuilderTipScreen extends Screen {
 		BuilderTheme theme = BuilderTheme.current();
 		graphics.fill(left - 1, top - 1, left + panelWidth + 1, top + panelHeight + 1, theme.border);
 		graphics.fill(left, top, left + panelWidth, top + panelHeight, theme.panelTop);
-		graphics.drawString(font, title, left + 12, top + 12, theme.accent);
+		ThemeText.draw(graphics, font, title, left + 12, top + 12, theme.accent);
 		int y = top + 30;
 		graphics.enableScissor(left + 12, y, left + 12 + contentWidth, top + panelHeight - 60);
 		for (FormattedCharSequence line : lines) {
-			graphics.drawString(font, line, left + 12, y, theme.text);
+			ThemeText.draw(graphics, font, line, left + 12, y, theme.text);
 			y += 11;
 		}
 		graphics.disableScissor();

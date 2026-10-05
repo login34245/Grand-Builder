@@ -60,8 +60,8 @@ public final class BuilderSettingsScreen extends Screen {
 		BuilderTheme theme = BuilderTheme.current();
 		graphics.fill(left - 1, top - 1, left + panelWidth + 1, top + panelHeight + 1, theme.border);
 		graphics.fillGradient(left, top, left + panelWidth, top + panelHeight, theme.panelTop, theme.panelBottom);
-		graphics.drawCenteredString(font, title, width / 2, top + 10, theme.text);
-		for (int row = 0; row < 7; row++) graphics.drawString(font, fit(label(row), (panelWidth - 28) / 2),
+		ThemeText.centered(graphics, font, title, width / 2, top + 10, theme.text);
+		for (int row = 0; row < 7; row++) ThemeText.draw(graphics, font, fit(label(row), (panelWidth - 28) / 2),
 			left + 12, layout.rowY(row) + (rowHeight - 8) / 2, theme.muted);
 		super.render(graphics, mouseX, mouseY, partialTick);
 	}

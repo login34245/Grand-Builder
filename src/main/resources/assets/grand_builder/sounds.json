@@ -1,4 +1,7 @@
 {
+  "effect.set_open": {"subtitle": "subtitles.grand_builder.set_open", "sounds": ["grand_builder:effects/set_open"]},
+  "effect.set_snap": {"subtitle": "subtitles.grand_builder.set_snap", "sounds": ["grand_builder:effects/set_snap"]},
+  "effect.set_finale": {"subtitle": "subtitles.grand_builder.set_finale", "sounds": ["grand_builder:effects/set_finale"]},
   "effect.block_flight": {"subtitle": "subtitles.grand_builder.block_flight", "sounds": ["grand_builder:effects/block_flight"]},
   "effect.rubble_pull": {"subtitle": "subtitles.grand_builder.rubble_pull", "sounds": ["grand_builder:effects/rubble_pull"]},
   "effect.assembly_servo": {"subtitle": "subtitles.grand_builder.assembly_servo", "sounds": ["grand_builder:effects/assembly_servo"]},

@@ -278,11 +278,14 @@ public final class BuilderControlsTest {
 		check(preferences.theme() == BuilderTheme.CURRENT && !preferences.structureList() && !preferences.defaultTerrain()
 			&& preferences.defaultSpeed() == dev.grandbuilder.build.BuildSpeed.NORMAL, "Migration did not supply safe defaults");
 		preferences.setTheme(BuilderTheme.LIGHT); preferences.setStructureList(true); preferences.setDefaultTerrain(true);
+		check(preferences.cinematicCamera(), "Existing preferences did not enable the optional new mode camera");
+		preferences.setCinematicCamera(false);
+		check(!BuilderTheme.LIGHT.textShadow() && BuilderTheme.CURRENT.textShadow() && BuilderTheme.DARK.textShadow(), "Light text keeps its dark shadow");
 		preferences.setDefaultSpeed(dev.grandbuilder.build.BuildSpeed.OVERDRIVE);
 		preferences.setDefaultEffect(dev.grandbuilder.build.BuildEffectMode.HEROBRINE);
 		preferences.setDefaultPlacement(dev.grandbuilder.build.PlacementPolicy.REPLACE);
 		preferences = new BuilderTipPreferences(file);
-		check(preferences.theme() == BuilderTheme.LIGHT && preferences.structureList() && preferences.defaultTerrain()
+		check(preferences.theme() == BuilderTheme.LIGHT && !preferences.cinematicCamera() && preferences.structureList() && preferences.defaultTerrain()
 			&& preferences.defaultSpeed() == dev.grandbuilder.build.BuildSpeed.OVERDRIVE
 			&& preferences.defaultEffect() == dev.grandbuilder.build.BuildEffectMode.HEROBRINE
 			&& preferences.defaultPlacement() == dev.grandbuilder.build.PlacementPolicy.REPLACE, "Settings did not survive restart");

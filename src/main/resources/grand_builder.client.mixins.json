@@ -4,6 +4,9 @@
   "compatibilityLevel": "JAVA_21",
   "client": [
     "CameraEffectsMixin",
+    "CinematicHudMixin",
+    "CinematicHandMixin",
+    "BuilderButtonThemeMixin",
     "PreviewKeyboardMixin",
     "RenderTypeAccess"
   ],

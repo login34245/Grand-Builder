@@ -16,7 +16,8 @@ public enum BuildEffectMode {
 	REVERSE_COLLAPSE("reverse_collapse", false, 0),
 	ASSEMBLY_WORKSHOP("assembly_workshop", false, 0),
 	SCALE_MODEL("scale_model", false, 0),
-	ORBITAL_STRIKE("orbital_strike", true, 92);
+	ORBITAL_STRIKE("orbital_strike", true, 92),
+	SET_CHANGE("set_change", false, 0);
 
 	private final String key;
 	private final boolean instantReveal;
@@ -41,7 +42,7 @@ public enum BuildEffectMode {
 	}
 
 	public boolean kinetic() {
-		return this == FLYING_BLOCKS || this == REVERSE_COLLAPSE || this == ASSEMBLY_WORKSHOP || this == SCALE_MODEL;
+		return this == FLYING_BLOCKS || this == REVERSE_COLLAPSE || this == ASSEMBLY_WORKSHOP || this == SCALE_MODEL || this == SET_CHANGE;
 	}
 
 	public int setupTicks() {
@@ -49,6 +50,7 @@ public enum BuildEffectMode {
 			case FLYING_BLOCKS -> 12;
 			case REVERSE_COLLAPSE, ASSEMBLY_WORKSHOP -> 32;
 			case SCALE_MODEL -> 48;
+			case SET_CHANGE -> 96;
 			default -> 0;
 		};
 	}
@@ -63,6 +65,10 @@ public enum BuildEffectMode {
 
 	public int revealDelayTicks() {
 		return revealDelayTicks;
+	}
+
+	public int aftermathTicks() {
+		return this == SET_CHANGE ? 80 : this == ORBITAL_STRIKE ? 52 : this == BUILDER_CHARGE ? 44 : 28;
 	}
 
 	public int networkId() {

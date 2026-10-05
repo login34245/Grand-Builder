@@ -62,6 +62,9 @@ public class GrandBuilderModClient implements ClientModInitializer {
 	));
 
 	private static boolean hintShown;
+	private static final KeyMapping CINEMATIC_KEY = KeyBindingHelper.registerKeyBinding(new KeyMapping(
+		"key.grand_builder.skip_cinematic", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_V, GRAND_BUILDER_CATEGORY));
+	public static Component cinematicKeyName() { return CINEMATIC_KEY.getTranslatedKeyMessage(); }
 	private static final PreviewKey[] PREVIEW_KEYS = {
 		new PreviewKey("rotate_preview", GLFW.GLFW_KEY_R, BuildControlAction.ROTATE_PREVIEW, false),
 		new PreviewKey("move_preview_forward", GLFW.GLFW_KEY_UP, BuildControlAction.MOVE_PREVIEW_FORWARD, true),
@@ -164,6 +167,8 @@ public class GrandBuilderModClient implements ClientModInitializer {
 			GrandBuilderClientEffects.tick(client);
 			StructurePreviewClientState.tick(client);
 			while (FAST_PREVIEW_KEY.consumeClick()) { }
+			while (CINEMATIC_KEY.consumeClick()) if (client.player != null && client.screen == null)
+				GrandBuilderClientEffects.dismissCinematic(client.player.getUUID());
 			if (client.player == null) {
 				for (PreviewKey key : PREVIEW_KEYS) key.tick(false);
 				PreviewConfirmState.disarm();

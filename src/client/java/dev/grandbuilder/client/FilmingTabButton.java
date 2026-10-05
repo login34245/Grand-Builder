@@ -64,7 +64,7 @@ final class FilmingTabButton extends Button {
 			if (space < font.width("...")) return;
 			if (font.width(caption) > space) caption = font.plainSubstrByWidth(caption, space - font.width("...")) + "...";
 			graphics.enableScissor(textLeft, getY(), textRight, getBottom());
-			graphics.drawString(font, caption,
+			ThemeText.draw(graphics, font, caption,
 				textLeft, getY() + (bounds.inHeader() ? 3 : 6), theme.accent);
 			graphics.disableScissor();
 		}

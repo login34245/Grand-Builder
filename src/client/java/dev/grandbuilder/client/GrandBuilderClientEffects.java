@@ -63,6 +63,7 @@ public final class GrandBuilderClientEffects {
 		private KineticBuildPayload kinetic;
 		private List<KineticBuildPayload.Cell> cells = List.of();
 		private int kineticElapsed;
+		private boolean cameraDismissed;
 
 		private Scene(BuildEffectPayload payload) {
 			this.payload = payload;
@@ -200,6 +201,11 @@ public final class GrandBuilderClientEffects {
 			scene.payload = payload;
 			scene.staleTicks = 0;
 		}
+		if (BuildEffectMode.byNetworkId(payload.effectModeId()) == BuildEffectMode.SET_CHANGE) {
+			scene.age = scene.previousAge = Math.max(0, payload.ageTicks());
+			if (payload.phaseId() != BuildEffectPayload.PHASE_REVEAL && payload.phaseId() != BuildEffectPayload.PHASE_STOP)
+				scene.motionAge = scene.previousMotionAge = scene.age;
+		}
 		if (payload.phaseId() != BuildEffectPayload.PHASE_PAUSED) scene.movingPhase = payload.phaseId();
 		boolean dismantleBlast = payload.dismantling() && BuildEffectMode.byNetworkId(payload.effectModeId()) == BuildEffectMode.BUILDER_CHARGE
 			&& payload.phaseId() == BuildEffectPayload.PHASE_BUILD && !scene.blastTriggered;
@@ -297,6 +303,28 @@ public final class GrandBuilderClientEffects {
 			}
 		}
 		return List.copyOf(frames);
+	}
+
+	public static Frame cinematicFrame(float partialTick, UUID ownerId) {
+		List<Frame> frames = extract(partialTick);
+		int index = 0;
+		Scene latest = null;
+		Frame selected = null;
+		for (Scene scene : SCENES.values()) {
+			Frame frame = frames.get(index++);
+			if (scene.payload.ownerId().equals(ownerId)) {
+				latest = scene;
+				selected = frame;
+			}
+		}
+		// A previous build's outro must not reclaim the camera from a newer or paused job.
+		return latest == null || selected.mode() != BuildEffectMode.SET_CHANGE || latest.cameraDismissed
+			|| latest.payload.phaseId() == BuildEffectPayload.PHASE_PAUSED || latest.payload.phaseId() == BuildEffectPayload.PHASE_STOP
+			? null : selected;
+	}
+
+	public static void dismissCinematic(UUID ownerId) {
+		for (Scene scene : SCENES.values()) if (scene.payload.ownerId().equals(ownerId)) scene.cameraDismissed = true;
 	}
 
 	private static ActorFrame actorFrame(Actor actor, float partialTick, float opacity, boolean ghost) {

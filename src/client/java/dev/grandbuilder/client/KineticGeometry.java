@@ -17,6 +17,7 @@ public final class KineticGeometry {
 		double a = random(cell.index(), 1) * Math.PI * 2, b = random(cell.index(), 2), c = random(cell.index(), 3);
 		double radius = Math.min(36, Math.max(f.width(), f.depth()) * 0.7 + 6);
 		return switch (f.mode()) {
+			case SET_CHANGE -> SetChangeGeometry.blockPose(frame, cell, x, y, z, remaining);
 			case FLYING_BLOCKS -> {
 				if (remaining > flight + 2) yield null;
 				double arc = Math.sin(t * Math.PI) * (3 + b * 4);

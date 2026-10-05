@@ -26,6 +26,12 @@ public abstract class CameraEffectsMixin {
 			PreviewOrbit.Pose pose=view.orbit().pose(view);
 			if (pose!=null) { setRotation(pose.yaw(),pose.pitch()); setPosition(pose.position()); return; }
 		}
+		dev.grandbuilder.client.CinematicCamera.Shot shot = dev.grandbuilder.client.CinematicCamera.current(partialTick);
+		if (shot != null) {
+			setPosition(shot.position()); setRotation(shot.yaw(), shot.pitch());
+			((Camera) (Object) this).rotation().rotateZ(shot.roll());
+			return;
+		}
 		float power = GrandBuilderClientEffects.shake(partialTick);
 		if (power <= 0.0f) {
 			return;

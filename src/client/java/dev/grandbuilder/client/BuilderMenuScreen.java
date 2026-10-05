@@ -65,6 +65,7 @@ public class BuilderMenuScreen extends Screen {
 	private CycleButton<PlacementPolicy> replacementButton;
 	private Button effectButton;
 	private Button optionsButton;
+	private CycleButton<Boolean> cinematicButton;
 	private Button captureFormatButton;
 	private Button startButton;
 	private Button captureButton;
@@ -209,6 +210,12 @@ public class BuilderMenuScreen extends Screen {
 			lastOptions = selectedOptions;
 			refreshButtonMessages();
 		}).bounds(layout.innerLeft(), layout.optionsButtonY(), layout.contentWidth(), layout.buttonHeight()).build());
+		this.cinematicButton = this.addRenderableWidget(CycleButton.<Boolean>builder(value ->
+			fitButtonMessage(cinematicMessage(value), layout.contentWidth()), BuilderTipPreferences.get().cinematicCamera())
+			.withValues(true, false).displayOnlyValue()
+			.create(layout.innerLeft(), layout.optionsButtonY(), layout.contentWidth(), layout.buttonHeight(),
+				Component.translatable("screen.grand_builder.cinematic_camera", Component.empty()),
+				(button, value) -> BuilderTipPreferences.get().setCinematicCamera(value)));
 
 		this.captureFormatButton = this.addRenderableWidget(Button.builder(fitButtonMessage(captureFormatMessage(), layout.contentWidth()), button -> {
 			this.selectedCaptureFormat = this.selectedCaptureFormat.next();
@@ -563,8 +570,8 @@ public class BuilderMenuScreen extends Screen {
 		for (Button button : new Button[] {structureButton,folderButton,inspectButton,importButton,effectButton,captureFormatButton,startButton,captureButton,
 			pauseResumeButton,rollbackButton,cancelPreviewButton}) if (button != null) button.setHeight(layout.buttonHeight());
 		if (this.optionsButton != null) {
-			this.optionsButton.visible = hasModeOptions();
-			this.optionsButton.active = hasModeOptions() && (selectedEffectMode != BuildEffectMode.BUILDER_CHARGE || selectedOptions.replaceExistingBlocks());
+			this.optionsButton.visible = hasModeOptions() && selectedEffectMode != BuildEffectMode.SET_CHANGE;
+			this.optionsButton.active = this.optionsButton.visible && (selectedEffectMode != BuildEffectMode.BUILDER_CHARGE || selectedOptions.replaceExistingBlocks());
 			this.optionsButton.setY(layout.optionsButtonY());
 			this.optionsButton.setHeight(layout.buttonHeight());
 			setFittedMessage(this.optionsButton, optionsMessage());
@@ -572,6 +579,12 @@ public class BuilderMenuScreen extends Screen {
 				? Tooltip.create(Component.translatable(!selectedOptions.replaceExistingBlocks()
 					? "screen.grand_builder.blocks_keep_explosion" : selectedOptions.destructiveExplosion()
 					? "screen.grand_builder.destructive_warning" : "screen.grand_builder.explosion_visual")) : null);
+		}
+		if (this.cinematicButton != null) {
+			this.cinematicButton.visible = this.cinematicButton.active = selectedEffectMode == BuildEffectMode.SET_CHANGE;
+			this.cinematicButton.setY(layout.optionsButtonY());
+			this.cinematicButton.setHeight(layout.buttonHeight());
+			this.cinematicButton.setValue(BuilderTipPreferences.get().cinematicCamera());
 		}
 		if (this.speedButton != null) {
 			this.speedButton.visible = showSpeed;
@@ -617,7 +630,7 @@ public class BuilderMenuScreen extends Screen {
 
 	private boolean hasModeOptions() {
 		return selectedEffectMode == BuildEffectMode.DISMANTLE || selectedEffectMode == BuildEffectMode.REVERSE
-			|| selectedEffectMode == BuildEffectMode.BUILDER_CHARGE;
+			|| selectedEffectMode == BuildEffectMode.BUILDER_CHARGE || selectedEffectMode == BuildEffectMode.SET_CHANGE;
 	}
 
 	private Component optionsMessage() {
@@ -628,6 +641,10 @@ public class BuilderMenuScreen extends Screen {
 				? "screen.grand_builder.explosion_destructive" : "screen.grand_builder.explosion_visual");
 			default -> Component.empty();
 		};
+	}
+
+	private static Component cinematicMessage(boolean enabled) {
+		return Component.translatable("screen.grand_builder.cinematic_camera", Component.translatable(enabled ? "options.on" : "options.off"));
 	}
 
 	private void updateEstimateRequest() {
@@ -687,12 +704,12 @@ public class BuilderMenuScreen extends Screen {
 		BuilderTheme theme = BuilderTheme.current();
 		if (theme != BuilderTheme.CURRENT) color = color == 0xFFFFDEA3 ? theme.accent
 			: color == 0xFFF2F7FF || color == 0xFFDBE9FF ? theme.text : theme.muted;
-		guiGraphics.drawString(this.font, fitText(message, maxWidth), x, y, color);
+		ThemeText.draw(guiGraphics, this.font, fitText(message, maxWidth), x, y, color);
 	}
 
 	private void drawCenteredFittedString(GuiGraphics guiGraphics, Component message, int centerX, int y, int maxWidth, int color) {
 		if (BuilderTheme.current() != BuilderTheme.CURRENT && color == 0xFFB3D2F0) color = BuilderTheme.current().muted;
-		guiGraphics.drawCenteredString(this.font, fitText(message, maxWidth), centerX, y, color);
+		ThemeText.centered(guiGraphics, this.font, fitText(message, maxWidth), centerX, y, color);
 	}
 
 	@Override
@@ -800,7 +817,7 @@ public class BuilderMenuScreen extends Screen {
 
 		int lineY = y + 1;
 		for (String line : lines) {
-			guiGraphics.drawString(this.font, line, x, lineY, 0xFFF2F7FF);
+			ThemeText.draw(guiGraphics, this.font, line, x, lineY, 0xFFF2F7FF);
 			lineY += 10;
 		}
 	}

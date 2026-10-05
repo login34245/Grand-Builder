@@ -25,7 +25,7 @@ public final class StructureInspectScreen extends Screen implements PreviewOrbit
 	@Override public void render(GuiGraphics graphics,int mouseX,int mouseY,float partialTick) {
 		BuilderTheme theme = BuilderTheme.current();
 		graphics.fill(0,0,width,26,theme.panelTop);
-		graphics.drawCenteredString(font,title,width/2,9,theme.text);
+		ThemeText.centered(graphics, font,title,width/2,9,theme.text);
 		super.render(graphics,mouseX,mouseY,partialTick);
 	}
 	@Override public boolean mouseDragged(MouseButtonEvent event,double dx,double dy) {

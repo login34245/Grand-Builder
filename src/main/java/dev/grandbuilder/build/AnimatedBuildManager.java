@@ -862,7 +862,7 @@ public final class AnimatedBuildManager {
 				job.finishEffects(level);
 				job.restoreClockworkTime(level);
 				job.sendScene(level, job.effectMode == BuildEffectMode.DISMANTLE ? BuildEffectPayload.PHASE_STOP : BuildEffectPayload.PHASE_REVEAL,
-					job.effectMode == BuildEffectMode.ORBITAL_STRIKE ? 52 : job.effectMode == BuildEffectMode.BUILDER_CHARGE ? 44 : 28, 0, revealShakeIntensity(job.effectMode));
+					job.effectMode.aftermathTicks(), 0, revealShakeIntensity(job.effectMode));
 				if (owner != null) {
 					owner.displayClientMessage(Component.translatable(job.effectMode == BuildEffectMode.DISMANTLE
 						? "message.grand_builder.dismantled" : "message.grand_builder.completed", job.structureName), true);
@@ -2390,7 +2390,7 @@ public final class AnimatedBuildManager {
 			BlockPos max = new BlockPos(effectBounds.maxX(), effectBounds.maxY(), effectBounds.maxZ());
 			BuildEffectPayload payload = new BuildEffectPayload(sceneId, dimensionKey.identifier(), min, max,
 				visual.networkId(), phase, Math.max(1, duration), age, (float) (progressPercent() / 100.0), power,
-				effectMode == BuildEffectMode.DISMANTLE, options.startSide().ordinal() + facing.ordinal()*8, options.destructiveExplosion());
+				effectMode == BuildEffectMode.DISMANTLE, options.startSide().ordinal() + facing.ordinal()*8, options.destructiveExplosion(), ownerId);
 			double centerX = (min.getX() + max.getX() + 1.0) * 0.5;
 			double centerZ = (min.getZ() + max.getZ() + 1.0) * 0.5;
 			for (ServerPlayer viewer : level.players()) {
@@ -2846,6 +2846,13 @@ public final class AnimatedBuildManager {
 			effectTick++;
 			BlockPos center = effectCenter(level);
 			switch (options.visualMode(effectMode)) {
+				case SET_CHANGE -> {
+					if (effectTick == 1 || effectTick == 42)
+						level.playSound(null, center, GrandBuilderMod.SET_OPEN, SoundSource.BLOCKS, 1.0f, effectTick == 42 ? 1.15f : 0.85f);
+					if (effectTick == 84) level.playSound(null, center, GrandBuilderMod.SET_SNAP, SoundSource.BLOCKS, 1.2f, 1.0f);
+					if (effectTick > 96 && effectTick % 24 == 0)
+						level.playSound(null, center, GrandBuilderMod.BLOCK_FLIGHT, SoundSource.BLOCKS, 0.5f, 0.8f);
+				}
 				case ORBITAL_STRIKE -> {
 					if (effectTick == 1) level.playSound(null, center, SoundEvents.BEACON_ACTIVATE, SoundSource.BLOCKS, 0.8f, 0.5f);
 					if (effectTick >= 32 && effectTick < 75 && effectTick % 8 == 0)
@@ -2944,7 +2951,9 @@ public final class AnimatedBuildManager {
 
 		private void finishEffects(ServerLevel level) {
 			BlockPos center = effectCenter(level);
-			if (effectMode == BuildEffectMode.CLOCKWORK_GRID) {
+			if (effectMode == BuildEffectMode.SET_CHANGE) {
+				level.playSound(null, center, GrandBuilderMod.SET_FINALE, SoundSource.BLOCKS, 1.1f, 1.0f);
+			} else if (effectMode == BuildEffectMode.CLOCKWORK_GRID) {
 				level.playSound(null, center, SoundEvents.COPPER_BULB_TURN_ON, SoundSource.BLOCKS, 0.8f, 1.65f);
 				level.playSound(null, center, SoundEvents.ANVIL_USE, SoundSource.BLOCKS, 0.55f, 1.15f);
 			} else if (effectMode == BuildEffectMode.AURORA_WEAVE) {

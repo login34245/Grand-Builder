@@ -73,6 +73,9 @@ public class GrandBuilderMod implements ModInitializer {
 	public static final SoundEvent RUBBLE_PULL = SoundEvent.createVariableRangeEvent(id("effect.rubble_pull"));
 	public static final SoundEvent ASSEMBLY_SERVO = SoundEvent.createVariableRangeEvent(id("effect.assembly_servo"));
 	public static final SoundEvent MODEL_UNFOLD = SoundEvent.createVariableRangeEvent(id("effect.model_unfold"));
+	public static final SoundEvent SET_OPEN = SoundEvent.createVariableRangeEvent(id("effect.set_open"));
+	public static final SoundEvent SET_SNAP = SoundEvent.createVariableRangeEvent(id("effect.set_snap"));
+	public static final SoundEvent SET_FINALE = SoundEvent.createVariableRangeEvent(id("effect.set_finale"));
 
 	public static final Item STRUCTURE_CORE = new StructureCoreItem(new Item.Properties()
 		.setId(STRUCTURE_CORE_KEY)
@@ -94,6 +97,9 @@ public class GrandBuilderMod implements ModInitializer {
 		Registry.register(BuiltInRegistries.SOUND_EVENT, RUBBLE_PULL.location(), RUBBLE_PULL);
 		Registry.register(BuiltInRegistries.SOUND_EVENT, ASSEMBLY_SERVO.location(), ASSEMBLY_SERVO);
 		Registry.register(BuiltInRegistries.SOUND_EVENT, MODEL_UNFOLD.location(), MODEL_UNFOLD);
+		Registry.register(BuiltInRegistries.SOUND_EVENT, SET_OPEN.location(), SET_OPEN);
+		Registry.register(BuiltInRegistries.SOUND_EVENT, SET_SNAP.location(), SET_SNAP);
+		Registry.register(BuiltInRegistries.SOUND_EVENT, SET_FINALE.location(), SET_FINALE);
 		Registry.register(BuiltInRegistries.CREATIVE_MODE_TAB, CREATIVE_TAB_KEY, FabricItemGroup.builder()
 			.title(Component.translatable("itemGroup.grand_builder.main"))
 			.icon(() -> new ItemStack(STRUCTURE_CORE))
