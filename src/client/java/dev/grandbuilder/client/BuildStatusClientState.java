@@ -5,6 +5,7 @@ import dev.grandbuilder.network.BuildStatusPayload;
 
 public final class BuildStatusClientState {
 	private static volatile Snapshot snapshot = Snapshot.empty();
+	private static volatile int revision;
 
 	private BuildStatusClientState() {
 	}
@@ -21,14 +22,17 @@ public final class BuildStatusClientState {
 			payload.speedBlocksPerTick(),
 			payload.terrainAdaptationEnabled()
 		);
+		revision++;
 	}
 
 	public static Snapshot snapshot() {
 		return snapshot;
 	}
+	public static int revision() { return revision; }
 
 	public static void reset() {
 		snapshot = Snapshot.empty();
+		revision++;
 	}
 
 	public record Snapshot(

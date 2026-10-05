@@ -5,6 +5,7 @@ import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.Identifier;
 
 public record BuildStatusPayload(
 	int modeId,
@@ -17,7 +18,7 @@ public record BuildStatusPayload(
 	float speedBlocksPerTick,
 	boolean terrainAdaptationEnabled
 ) implements CustomPacketPayload {
-	public static final Type<BuildStatusPayload> TYPE = new Type<>(GrandBuilderMod.id("build_status"));
+	public static final Type<BuildStatusPayload> TYPE = new Type<>(Identifier.fromNamespaceAndPath(GrandBuilderMod.MOD_ID, "build_status"));
 	public static final StreamCodec<RegistryFriendlyByteBuf, BuildStatusPayload> CODEC = StreamCodec.composite(
 		ByteBufCodecs.VAR_INT, BuildStatusPayload::modeId,
 		ByteBufCodecs.stringUtf8(256), BuildStatusPayload::structureName,

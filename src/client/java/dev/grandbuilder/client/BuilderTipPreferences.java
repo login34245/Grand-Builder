@@ -2,6 +2,9 @@ package dev.grandbuilder.client;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import dev.grandbuilder.build.BuildSpeed;
+import dev.grandbuilder.build.BuildEffectMode;
+import dev.grandbuilder.build.PlacementPolicy;
 import java.io.IOException;
 import java.io.Reader;
 import java.io.Writer;
@@ -27,6 +30,12 @@ public final class BuilderTipPreferences {
 		boolean showTips = true;
 		long lastShownAtMillis;
 		int nextTip;
+		BuilderTheme theme = BuilderTheme.CURRENT;
+		boolean structureList;
+		BuildSpeed defaultSpeed = BuildSpeed.NORMAL;
+		boolean defaultTerrain;
+		BuildEffectMode defaultEffect = BuildEffectMode.STANDARD;
+		PlacementPolicy defaultPlacement = PlacementPolicy.PRESERVE;
 	}
 
 	public static BuilderTipPreferences get() {
@@ -46,6 +55,30 @@ public final class BuilderTipPreferences {
 		}
 		settings.lastShownAtMillis = Math.max(0, settings.lastShownAtMillis);
 		settings.nextTip = Math.floorMod(settings.nextTip, TIP_COUNT);
+		if (settings.theme == null) settings.theme = BuilderTheme.CURRENT;
+		if (settings.defaultSpeed == null) settings.defaultSpeed = BuildSpeed.NORMAL;
+		if (settings.defaultEffect == null) settings.defaultEffect = BuildEffectMode.STANDARD;
+		if (settings.defaultPlacement == null) settings.defaultPlacement = PlacementPolicy.PRESERVE;
+	}
+
+	public BuilderTheme theme() { return settings.theme; }
+	public boolean structureList() { return settings.structureList; }
+	public BuildSpeed defaultSpeed() { return settings.defaultSpeed; }
+	public boolean defaultTerrain() { return settings.defaultTerrain; }
+	public BuildEffectMode defaultEffect() { return settings.defaultEffect; }
+	public PlacementPolicy defaultPlacement() { return settings.defaultPlacement; }
+	public void setTheme(BuilderTheme value) { settings.theme = java.util.Objects.requireNonNull(value); save(); }
+	public void setStructureList(boolean value) { settings.structureList = value; save(); }
+	public void setDefaultSpeed(BuildSpeed value) { settings.defaultSpeed = java.util.Objects.requireNonNull(value); save(); }
+	public void setDefaultTerrain(boolean value) { settings.defaultTerrain = value; save(); }
+	public void setDefaultEffect(BuildEffectMode value) { settings.defaultEffect = java.util.Objects.requireNonNull(value); save(); }
+	public void setDefaultPlacement(PlacementPolicy value) { settings.defaultPlacement = java.util.Objects.requireNonNull(value); save(); }
+	public void resetDefaults() {
+		Settings defaults = new Settings();
+		defaults.lastShownAtMillis = settings.lastShownAtMillis;
+		defaults.nextTip = settings.nextTip;
+		settings = defaults;
+		save();
 	}
 
 	public boolean enabled() { return settings.showTips; }

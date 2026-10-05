@@ -97,16 +97,17 @@ public final class FilmingToolsScreen extends Screen {
 	@Override public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
 		parent.render(graphics, -1, -1, partialTick);
 		graphics.fill(0, 0, width, height, 0xB0000000);
-		graphics.fill(left - 1, top - 1, left + panelWidth + 1, top + panelHeight + 1, 0xFF577EA3);
-		graphics.fill(left, top, left + panelWidth, top + panelHeight, 0xFF142234);
-		graphics.drawCenteredString(font, title, width / 2, top + 9, 0xFFFFDEA3);
+		BuilderTheme theme = BuilderTheme.current();
+		graphics.fill(left - 1, top - 1, left + panelWidth + 1, top + panelHeight + 1, theme.border);
+		graphics.fill(left, top, left + panelWidth, top + panelHeight, theme.panelTop);
+		graphics.drawCenteredString(font, title, width / 2, top + 9, theme.accent);
 		String info = feedbackTicks > 0 ? feedbackKey : state == null ? "screen.grand_builder.filming.loading"
 			: !state.permitted() ? "screen.grand_builder.filming.denied" : state.invisible()
 			? "screen.grand_builder.filming.invisible" : "screen.grand_builder.filming.visible";
 		String line = font.plainSubstrByWidth(Component.translatable(info).getString(), panelWidth - 24);
-		graphics.drawCenteredString(font, line, width / 2, top + 22, 0xFFB9D8F6);
-		graphics.drawString(font, Component.translatable("screen.grand_builder.filming.time"), left + 12, timeY - 11, 0xFFE3EEF7);
-		graphics.drawString(font, Component.translatable("screen.grand_builder.filming.weather"), left + 12, weatherY - 11, 0xFFE3EEF7);
+		graphics.drawCenteredString(font, line, width / 2, top + 22, theme.muted);
+		graphics.drawString(font, Component.translatable("screen.grand_builder.filming.time"), left + 12, timeY - 11, theme.text);
+		graphics.drawString(font, Component.translatable("screen.grand_builder.filming.weather"), left + 12, weatherY - 11, theme.text);
 		super.render(graphics, mouseX, mouseY, partialTick);
 		if (state != null && state.permitted()) {
 			FilmingAction time = state.dayTime() < 3000 ? FilmingAction.DAWN : state.dayTime() < 10000 ? FilmingAction.DAY
@@ -119,7 +120,7 @@ public final class FilmingToolsScreen extends Screen {
 
 	private void mark(GuiGraphics graphics, FilmingAction action) {
 		Button button = actions.get(action);
-		graphics.fill(button.getX() + 2, button.getBottom() - 2, button.getRight() - 2, button.getBottom() - 1, 0xFFFFDEA3);
+		graphics.fill(button.getX() + 2, button.getBottom() - 2, button.getRight() - 2, button.getBottom() - 1, BuilderTheme.current().accent);
 	}
 
 	@Override public void onClose() { minecraft.setScreen(parent); }

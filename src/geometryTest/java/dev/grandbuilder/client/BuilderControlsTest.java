@@ -28,6 +28,10 @@ public final class BuilderControlsTest {
 		verifyCodec();
 		verifyLargePreviewCodec();
 		verifyFilming();
+		verifyWorldHeight();
+		verifySettingsLayout();
+		verifyDefaultsCodec();
+		verifyStatusRevision();
 		verifyTranslations();
 		Path temporary = Files.createTempDirectory("grand-builder-tips-test-");
 		try { verifyPreferences(temporary); }
@@ -36,7 +40,51 @@ public final class BuilderControlsTest {
 				for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) Files.delete(path);
 			}
 		}
-		System.out.println("Builder controls verified: short/rebound presses, bounded clearing/undo, 1/10-block moves, network codec, persisted 15-minute cooldown, opt-out and EN/RU tips.");
+		System.out.println("Builder controls verified: settings migration/persistence, layout/tabs, actual world heights, fresh status/defaults codecs, short/rebound presses, clearing/undo, 1/10-block moves, persisted 15-minute cooldown and EN/RU tips.");
+	}
+	private static void verifyStatusRevision() {
+		int previous = BuildStatusClientState.revision();
+		var payload = new dev.grandbuilder.network.BuildStatusPayload(0, "", 0, 0, 0, false, 11, 512, false);
+		BuildStatusClientState.update(payload);
+		check(BuildStatusClientState.revision() != previous && !BuildStatusClientState.snapshot().terrainAdaptationEnabled()
+			&& BuildStatusClientState.snapshot().speedId() == 11, "Fresh idle settings were not acknowledged");
+		previous = BuildStatusClientState.revision(); BuildStatusClientState.reset();
+		check(BuildStatusClientState.revision() != previous, "Disconnect did not invalidate old status");
+	}
+	private static void verifySettingsLayout() {
+		for (int[] size : new int[][] {{640,360},{427,240},{320,180},{1920,1080}}) {
+			var layout = BuilderSettingsLayout.at(size[0], size[1]);
+			check(layout.left() >= 0 && layout.top() >= 0 && layout.left() + layout.width() <= size[0]
+				&& layout.top() + layout.height() <= size[1], "Settings panel left screen");
+			check(layout.rowHeight() >= 11, "Settings buttons cannot contain the font");
+			for (int row = 0; row < 7; row++) check(layout.rowY(row) + layout.rowHeight() <
+				(row == 6 ? layout.footerY() : layout.rowY(row + 1)), "Settings rows or footer overlap");
+			check(layout.footerY() + 20 < layout.top() + layout.height(), "Settings footer left panel");
+		}
+	}
+	private static void verifyWorldHeight() {
+		for (int[] range : new int[][] {{-64, 384}, {-1024, 3056}, {0, 2048}, {-512, 1536}}) {
+			var world = net.minecraft.world.level.LevelHeightAccessor.create(range[0], range[1]);
+			int min = world.getMinY(), max = world.getMaxY() - 1;
+			check(dev.grandbuilder.build.WorldHeightBounds.contains(world, min, max), "Actual world bounds were rejected");
+			check(!dev.grandbuilder.build.WorldHeightBounds.contains(world, min - 1, max), "Below-world position was accepted");
+			check(!dev.grandbuilder.build.WorldHeightBounds.contains(world, min, max + 1), "Exclusive ceiling became inclusive");
+			check(!dev.grandbuilder.build.WorldHeightBounds.contains(world, max, min), "Inverted height range was accepted");
+		}
+		check(dev.grandbuilder.build.WorldHeightBounds.contains(net.minecraft.world.level.LevelHeightAccessor.create(-64, 2096), 0, 1610),
+			"Tall building failed an expanded dimension");
+		check(!dev.grandbuilder.build.WorldHeightBounds.contains(net.minecraft.world.level.LevelHeightAccessor.create(-64, 384), 0, 1610),
+			"Tall building escaped vanilla dimension bounds");
+	}
+	private static void verifyDefaultsCodec() {
+		for (var speed : dev.grandbuilder.build.BuildSpeed.values()) for (boolean terrain : new boolean[] {false, true}) {
+			var payload = new dev.grandbuilder.network.BuildDefaultsPayload(speed.networkId(), terrain);
+			var buffer = new RegistryFriendlyByteBuf(Unpooled.buffer(), RegistryAccess.EMPTY);
+			try {
+				dev.grandbuilder.network.BuildDefaultsPayload.CODEC.encode(buffer, payload);
+				check(dev.grandbuilder.network.BuildDefaultsPayload.CODEC.decode(buffer).equals(payload) && !buffer.isReadable(), "Defaults codec changed values");
+			} finally { buffer.release(); }
+		}
 	}
 
 	private static void verifyLargePreviewCodec() {
@@ -172,6 +220,9 @@ public final class BuilderControlsTest {
 			int left = (viewport[0] - viewport[2]) / 2;
 			for (float progress : new float[] {0, 0.25f, 0.5f, 0.75f, 1}) {
 				var tab = FilmingTabLayout.at(viewport[0], left, 6, viewport[2], progress);
+				var settings = FilmingTabLayout.at(viewport[0], left, 6, viewport[2], progress, 1);
+				check(settings.x() >= 0 && settings.x() + settings.width() <= viewport[0], "Settings tab leaves viewport");
+				check(settings.inHeader() ? tab.x() + tab.width() < settings.x() : tab.y() + tab.height() < settings.y(), "Side tabs overlap");
 				check(tab.x() >= 0 && tab.x() + tab.width() <= viewport[0], "Filming tab leaves the viewport");
 				check(tab.inHeader() || tab.x() + tab.width() <= left || tab.x() >= left + viewport[2], "Side tab overlaps builder controls");
 				check(!tab.inHeader() || tab.y()+tab.height() < 6+18, "Compact filming tab overlaps the ETA header");
@@ -224,10 +275,30 @@ public final class BuilderControlsTest {
 			check(preferences.takeNextTip() == (i + 4) % BuilderTipPreferences.TIP_COUNT, "Tip cycle is not bounded");
 		preferences = new BuilderTipPreferences(file);
 		check(preferences.enabled() && preferences.takeAutomaticTip(now + 2 * cooldown + 1) == -1, "Final save did not retain settings");
+		check(preferences.theme() == BuilderTheme.CURRENT && !preferences.structureList() && !preferences.defaultTerrain()
+			&& preferences.defaultSpeed() == dev.grandbuilder.build.BuildSpeed.NORMAL, "Migration did not supply safe defaults");
+		preferences.setTheme(BuilderTheme.LIGHT); preferences.setStructureList(true); preferences.setDefaultTerrain(true);
+		preferences.setDefaultSpeed(dev.grandbuilder.build.BuildSpeed.OVERDRIVE);
+		preferences.setDefaultEffect(dev.grandbuilder.build.BuildEffectMode.HEROBRINE);
+		preferences.setDefaultPlacement(dev.grandbuilder.build.PlacementPolicy.REPLACE);
+		preferences = new BuilderTipPreferences(file);
+		check(preferences.theme() == BuilderTheme.LIGHT && preferences.structureList() && preferences.defaultTerrain()
+			&& preferences.defaultSpeed() == dev.grandbuilder.build.BuildSpeed.OVERDRIVE
+			&& preferences.defaultEffect() == dev.grandbuilder.build.BuildEffectMode.HEROBRINE
+			&& preferences.defaultPlacement() == dev.grandbuilder.build.PlacementPolicy.REPLACE, "Settings did not survive restart");
+		check(preferences.takeAutomaticTip(now + 2 * cooldown + 1) == -1, "Saving defaults erased tip cooldown");
+		preferences.resetDefaults(); preferences = new BuilderTipPreferences(file);
+		check(preferences.theme() == BuilderTheme.CURRENT && !preferences.defaultTerrain() && preferences.enabled()
+			&& preferences.takeAutomaticTip(now + 2 * cooldown + 1) == -1, "Reset lost cooldown or safe defaults");
 		try (var files = Files.list(file.getParent())) { check(files.count() == 1, "Atomic save leaked temporary files"); }
 		Files.writeString(file, "{\"nextTip\":-1,\"lastShownAtMillis\":-5}");
 		preferences = new BuilderTipPreferences(file);
 		check(preferences.enabled() && preferences.takeAutomaticTip(now) == BuilderTipPreferences.TIP_COUNT - 1, "Missing fields or invalid indices not normalized");
+		Files.writeString(file, "{\"theme\":\"unknown\",\"defaultSpeed\":null,\"defaultEffect\":null,\"defaultPlacement\":null}");
+		preferences = new BuilderTipPreferences(file);
+		check(preferences.theme() == BuilderTheme.CURRENT && preferences.defaultSpeed() == dev.grandbuilder.build.BuildSpeed.NORMAL
+			&& preferences.defaultEffect() == dev.grandbuilder.build.BuildEffectMode.STANDARD
+			&& preferences.defaultPlacement() == dev.grandbuilder.build.PlacementPolicy.PRESERVE, "Unknown settings were not normalized");
 		Files.writeString(file, "null");
 		preferences = new BuilderTipPreferences(file);
 		check(preferences.enabled() && preferences.takeAutomaticTip(now) == 0, "Null preferences did not recover");

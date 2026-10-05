@@ -29,7 +29,8 @@ public final class BuilderTipScreen extends Screen {
 		panelHeight = Math.min(height - 16, 90 + lines.size() * 11);
 		left = (width - panelWidth) / 2;
 		top = (height - panelHeight) / 2;
-		addRenderableWidget(Checkbox.builder(Component.translatable("screen.grand_builder.tips.enabled"), font)
+		addRenderableWidget(Checkbox.builder(Component.translatable("screen.grand_builder.tips.enabled")
+			.withStyle(style -> style.withColor(BuilderTheme.current().text & 0xFFFFFF)), font)
 			.pos(left + 12, top + panelHeight - 54).maxWidth(contentWidth)
 			.selected(BuilderTipPreferences.get().enabled())
 			.onValueChange((checkbox, enabled) -> BuilderTipPreferences.get().setEnabled(enabled)).build());
@@ -56,13 +57,14 @@ public final class BuilderTipScreen extends Screen {
 	@Override public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
 		parent.render(graphics, -1, -1, partialTick);
 		graphics.fill(0, 0, width, height, 0xB0000000);
-		graphics.fill(left - 1, top - 1, left + panelWidth + 1, top + panelHeight + 1, 0xFF577EA3);
-		graphics.fill(left, top, left + panelWidth, top + panelHeight, 0xFF142234);
-		graphics.drawString(font, title, left + 12, top + 12, 0xFFFFDEA3);
+		BuilderTheme theme = BuilderTheme.current();
+		graphics.fill(left - 1, top - 1, left + panelWidth + 1, top + panelHeight + 1, theme.border);
+		graphics.fill(left, top, left + panelWidth, top + panelHeight, theme.panelTop);
+		graphics.drawString(font, title, left + 12, top + 12, theme.accent);
 		int y = top + 30;
 		graphics.enableScissor(left + 12, y, left + 12 + contentWidth, top + panelHeight - 60);
 		for (FormattedCharSequence line : lines) {
-			graphics.drawString(font, line, left + 12, y, 0xFFF2F7FF);
+			graphics.drawString(font, line, left + 12, y, theme.text);
 			y += 11;
 		}
 		graphics.disableScissor();

@@ -111,6 +111,7 @@ public class GrandBuilderMod implements ModInitializer {
 		PayloadTypeRegistry.playS2C().register(LightningStrikePayload.TYPE, LightningStrikePayload.CODEC);
 		PayloadTypeRegistry.playC2S().register(BuildControlPayload.TYPE, BuildControlPayload.CODEC);
 		PayloadTypeRegistry.playC2S().register(BuildSetSpeedPayload.TYPE, BuildSetSpeedPayload.CODEC);
+		PayloadTypeRegistry.playC2S().register(dev.grandbuilder.network.BuildDefaultsPayload.TYPE, dev.grandbuilder.network.BuildDefaultsPayload.CODEC);
 		PayloadTypeRegistry.playC2S().register(CaptureRequestPayload.TYPE, CaptureRequestPayload.CODEC);
 		PayloadTypeRegistry.playS2C().register(BuildEffectPayload.TYPE, BuildEffectPayload.CODEC);
 		PayloadTypeRegistry.playS2C().register(HerobrinePlacementPayload.TYPE, HerobrinePlacementPayload.CODEC);
@@ -182,6 +183,8 @@ public class GrandBuilderMod implements ModInitializer {
 		ServerPlayNetworking.registerGlobalReceiver(BuildSetSpeedPayload.TYPE, (payload, context) -> context.server().execute(() ->
 			AnimatedBuildManager.setSpeed(context.player(), BuildSpeed.byNetworkId(payload.speedId()), false)
 		));
+		ServerPlayNetworking.registerGlobalReceiver(dev.grandbuilder.network.BuildDefaultsPayload.TYPE, (payload, context) ->
+			context.server().execute(() -> AnimatedBuildManager.applyDefaults(context.player(), BuildSpeed.byNetworkId(payload.speedId()), payload.terrainEnabled())));
 		ServerPlayNetworking.registerGlobalReceiver(CaptureRequestPayload.TYPE, (payload, context) -> context.server().execute(() -> {
 			AnimatedBuildManager.captureCustomStructure(context.player(), payload.format());
 			sendStructureList(context.player());

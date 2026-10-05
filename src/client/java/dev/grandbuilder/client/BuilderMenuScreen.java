@@ -41,17 +41,15 @@ public class BuilderMenuScreen extends Screen {
 	private static final int STRUCTURES_TOOLTIP_MAX_WIDTH = 260;
 
 	private static String lastStructureKey = StructureLibrary.defaultSelectionEntry().key();
-	private static BuildSpeed lastSpeed = BuildSpeed.NORMAL;
-	private static BuildEffectMode lastEffectMode = BuildEffectMode.STANDARD;
 	private static BuildOptions lastOptions = BuildOptions.DEFAULT;
 	private static int nextEstimateRequestId;
 	private static CustomCaptureFormat lastCaptureFormat = CustomCaptureFormat.SCHEM_SINGLE;
 
 	private List<StructureLibrary.SelectionEntry> structureChoices = new ArrayList<>();
 	private int selectedStructureIndex;
-	private BuildSpeed selectedSpeed = lastSpeed;
-	private BuildEffectMode selectedEffectMode = lastEffectMode;
-	private BuildOptions selectedOptions = new BuildOptions(lastOptions.startSide(), lastOptions.dismantleStyle(), false, lastOptions.placementPolicy());
+	private BuildSpeed selectedSpeed = BuilderTipPreferences.get().defaultSpeed();
+	private BuildEffectMode selectedEffectMode = BuilderTipPreferences.get().defaultEffect();
+	private BuildOptions selectedOptions = new BuildOptions(lastOptions.startSide(), lastOptions.dismantleStyle(), false, BuilderTipPreferences.get().defaultPlacement());
 	private BuildEstimatePayload estimate;
 	private BuildRequestPayload estimateSelection;
 	private int estimateRequestId;
@@ -74,12 +72,14 @@ public class BuilderMenuScreen extends Screen {
 	private Button rollbackButton;
 	private Button cancelPreviewButton;
 	private Button youtubeButton;
-	private CycleButton<Boolean> tipsButton;
 	private FilmingTabButton filmingTab;
+	private FilmingTabButton settingsTab;
+	private boolean initializedDefaults;
 	private boolean checkedAutomaticTip;
-	private boolean terrainEnabled = true;
+	private boolean terrainEnabled = BuilderTipPreferences.get().defaultTerrain();
 	private int statusPollCooldown = 0;
 	private int knownStructureListRevision = -1;
+	private int knownStatusRevision = BuildStatusClientState.revision();
 	private int youtubeBadgeLeft;
 	private int youtubeBadgeTop;
 
@@ -141,6 +141,10 @@ public class BuilderMenuScreen extends Screen {
 	@Override
 	protected void init() {
 		PreviewConfirmState.disarm();
+		if (!initializedDefaults) {
+			initializedDefaults = true;
+			ClientPlayNetworking.send(new dev.grandbuilder.network.BuildDefaultsPayload(selectedSpeed.networkId(), terrainEnabled));
+		}
 		sendControl(BuildControlAction.REQUEST_STRUCTURE_LIST);
 		reloadChoices();
 
@@ -148,16 +152,17 @@ public class BuilderMenuScreen extends Screen {
 		int actionRightWidth = layout.contentWidth() - layout.halfWidth() - 4;
 
 		this.structureButton = this.addRenderableWidget(Button.builder(fitButtonMessage(structureMessage(), layout.structureButtonWidth()), button -> {
-			this.selectedStructureIndex = (this.selectedStructureIndex + 1) % this.structureChoices.size();
-			setFittedMessage(this.structureButton, structureMessage());
+			if (BuilderTipPreferences.get().structureList()) minecraft.setScreen(new StructureSelectionScreen(this, currentSelection().key()));
+			else selectStructure(this.structureChoices.get((selectedStructureIndex + 1) % structureChoices.size()).key());
 		}).bounds(layout.innerLeft(), layout.structureButtonY(), layout.structureButtonWidth(), layout.buttonHeight()).build());
 		this.folderButton = this.addRenderableWidget(Button.builder(
 			fitButtonMessage(Component.translatable("screen.grand_builder.open_structures"), layout.folderButtonWidth()),
 			button -> openStructuresFolder()
 		).bounds(layout.innerLeft() + layout.structureButtonWidth() + 4, layout.structureButtonY(), layout.folderButtonWidth(), layout.buttonHeight()).build());
 		this.inspectButton = this.addRenderableWidget(Button.builder(Component.literal("3D"), button -> {
+			lastStructureKey = currentSelection().key();
 			ClientPlayNetworking.send(new StructureInspectRequestPayload(currentSelection().key()));
-			this.minecraft.setScreen(new StructureInspectScreen(dev.grandbuilder.network.StructurePreviewPayload.INSPECT));
+			this.minecraft.setScreen(new StructureInspectScreen(dev.grandbuilder.network.StructurePreviewPayload.INSPECT, this));
 		}).bounds(layout.innerLeft()+layout.structureButtonWidth()+layout.folderButtonWidth()+8,
 			layout.structureButtonY(),layout.inspectButtonWidth(),layout.buttonHeight()).build());
 		this.inspectButton.setTooltip(Tooltip.create(Component.translatable("screen.grand_builder.inspect_tooltip")));
@@ -175,7 +180,9 @@ public class BuilderMenuScreen extends Screen {
 		this.terrainButton = this.addRenderableWidget(Button.builder(fitButtonMessage(terrainMessage(), layout.splitRight()), button -> {
 			this.terrainEnabled = !this.terrainEnabled;
 			setFittedMessage(this.terrainButton, terrainMessage());
-			sendControl(BuildControlAction.TOGGLE_TERRAIN);
+			if (BuildStatusClientState.snapshot().modeId() == 0)
+				ClientPlayNetworking.send(new dev.grandbuilder.network.BuildDefaultsPayload(selectedSpeed.networkId(), terrainEnabled));
+			else sendControl(BuildControlAction.TOGGLE_TERRAIN);
 		}).bounds(layout.innerLeft() + layout.splitLeft() + 4, layout.speedButtonY(), layout.splitRight(), layout.buttonHeight()).build());
 		this.replacementButton = this.addRenderableWidget(CycleButton.<PlacementPolicy>builder(value ->
 			fitButtonMessage(Component.translatable(value.translationKey()), layout.contentWidth()), selectedOptions.placementPolicy())
@@ -192,7 +199,6 @@ public class BuilderMenuScreen extends Screen {
 		this.effectButton = this.addRenderableWidget(Button.builder(fitButtonMessage(effectMessage(), layout.contentWidth()), button -> {
 			this.selectedEffectMode = this.selectedEffectMode.next();
 			this.selectedOptions = new BuildOptions(selectedOptions.startSide(), selectedOptions.dismantleStyle(), false, selectedOptions.placementPolicy());
-			lastEffectMode = this.selectedEffectMode;
 			setFittedMessage(this.effectButton, effectMessage());
 			updateEffectDependentControls();
 		}).bounds(layout.innerLeft(), layout.effectButtonY(), layout.contentWidth(), layout.buttonHeight()).build());
@@ -229,18 +235,18 @@ public class BuilderMenuScreen extends Screen {
 			Component.translatable("screen.grand_builder.youtube.badge"),
 			button -> openYoutubeChannel()
 		).bounds(youtubeBadgeLeft, youtubeBadgeTop, YOUTUBE_BADGE_SIZE, YOUTUBE_BADGE_SIZE).build());
-		this.tipsButton = this.addRenderableWidget(CycleButton.booleanBuilder(
-			Component.translatable("screen.grand_builder.tips.on"), Component.translatable("screen.grand_builder.tips.off"),
-			BuilderTipPreferences.get().enabled()).displayOnlyValue()
-			.withTooltip(value -> Tooltip.create(Component.translatable("screen.grand_builder.tips.tooltip")))
-			.create(layout.innerRight() - YOUTUBE_BADGE_SIZE - 84, layout.etaY() - 2, 80, 14,
-				Component.translatable("screen.grand_builder.tips.title"),
-				(button, enabled) -> BuilderTipPreferences.get().setEnabled(enabled)));
 		this.filmingTab = this.addRenderableWidget(new FilmingTabButton(() -> {
 			UiLayout current = layout();
 			return FilmingTabLayout.at(width, current.left(), current.top(), current.panelWidth(),
 				filmingTab == null ? 0 : filmingTab.expansion());
 		}, button -> minecraft.setScreen(new FilmingToolsScreen(this))));
+		this.settingsTab = this.addRenderableWidget(new FilmingTabButton(() -> {
+			UiLayout current = layout();
+			return FilmingTabLayout.at(width, current.left(), current.top(), current.panelWidth(),
+				settingsTab == null ? 0 : settingsTab.expansion(), 1);
+		}, button -> minecraft.setScreen(new BuilderSettingsScreen(this)),
+			new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.COMPARATOR),
+			"screen.grand_builder.settings.title", "screen.grand_builder.settings.tab"));
 		updateEffectDependentControls();
 
 		sendControl(BuildControlAction.STATUS_SILENT);
@@ -385,6 +391,17 @@ public class BuilderMenuScreen extends Screen {
 		reloadChoices(lastStructureKey);
 	}
 
+	List<StructureLibrary.SelectionEntry> selectionEntries() { return List.copyOf(structureChoices); }
+	void refreshSelections() { syncStructureChoicesFromServer(); }
+	void selectStructure(String key) {
+		for (int i = 0; i < structureChoices.size(); i++) if (structureChoices.get(i).key().equals(key)) {
+			selectedStructureIndex = i;
+			lastStructureKey = key;
+			setFittedMessage(structureButton, structureMessage());
+			return;
+		}
+	}
+
 	private void reloadChoices(String preferredKey) {
 		this.structureChoices = new ArrayList<>(StructureListClientState.entries());
 		this.knownStructureListRevision = StructureListClientState.revision();
@@ -425,10 +442,6 @@ public class BuilderMenuScreen extends Screen {
 	private void sendBuildRequest() {
 		StructureLibrary.SelectionEntry selected = currentSelection();
 		lastStructureKey = selected.key();
-		if (!selectedEffectMode.hidesSpeed()) {
-			lastSpeed = selectedSpeed;
-		}
-		lastEffectMode = selectedEffectMode;
 
 		lastOptions = selectedOptions;
 		ClientPlayNetworking.send(selectionPayload());
@@ -652,6 +665,8 @@ public class BuilderMenuScreen extends Screen {
 	}
 
 	private void syncSpeedFromServer() {
+		if (knownStatusRevision == BuildStatusClientState.revision()) return;
+		knownStatusRevision = BuildStatusClientState.revision();
 		BuildStatusClientState.Snapshot snapshot = BuildStatusClientState.snapshot();
 		BuildSpeed serverSpeed = BuildSpeed.byNetworkId(snapshot.speedId());
 		if (serverSpeed != this.selectedSpeed) {
@@ -669,10 +684,14 @@ public class BuilderMenuScreen extends Screen {
 	}
 
 	private void drawFittedString(GuiGraphics guiGraphics, Component message, int x, int y, int maxWidth, int color) {
+		BuilderTheme theme = BuilderTheme.current();
+		if (theme != BuilderTheme.CURRENT) color = color == 0xFFFFDEA3 ? theme.accent
+			: color == 0xFFF2F7FF || color == 0xFFDBE9FF ? theme.text : theme.muted;
 		guiGraphics.drawString(this.font, fitText(message, maxWidth), x, y, color);
 	}
 
 	private void drawCenteredFittedString(GuiGraphics guiGraphics, Component message, int centerX, int y, int maxWidth, int color) {
+		if (BuilderTheme.current() != BuilderTheme.CURRENT && color == 0xFFB3D2F0) color = BuilderTheme.current().muted;
 		guiGraphics.drawCenteredString(this.font, fitText(message, maxWidth), centerX, y, color);
 	}
 
@@ -680,7 +699,8 @@ public class BuilderMenuScreen extends Screen {
 	public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
 		this.renderTransparentBackground(guiGraphics);
 
-		guiGraphics.fillGradient(0, 0, this.width, this.height, 0xCC0E1A2D, 0xCC081018);
+		BuilderTheme theme = BuilderTheme.current();
+		guiGraphics.fillGradient(0, 0, this.width, this.height, theme.backdropTop, theme.backdropBottom);
 
 		UiLayout layout = layout();
 		int left = layout.left();
@@ -689,19 +709,19 @@ public class BuilderMenuScreen extends Screen {
 		int bottom = top + layout.panelHeight();
 		int panelCenterX = left + layout.panelWidth() / 2;
 
-		guiGraphics.fill(left - 3, top - 3, right + 3, bottom + 3, 0xF02A4D73);
-		guiGraphics.fillGradient(left, top, right, bottom, 0xF0142234, 0xF01B314A);
-		guiGraphics.fill(left + 16, layout.topSeparatorY(), right - 16, layout.topSeparatorY() + 1, 0x66B5E8FF);
+		guiGraphics.fill(left - 3, top - 3, right + 3, bottom + 3, theme.border);
+		guiGraphics.fillGradient(left, top, right, bottom, theme.panelTop, theme.panelBottom);
+		guiGraphics.fill(left + 16, layout.topSeparatorY(), right - 16, layout.topSeparatorY() + 1, theme.muted & 0x66FFFFFF);
 		if (layout.captureLabelY() >= 0) guiGraphics.fill(left + 16, layout.captureLabelY() - 3, right - 16, layout.captureLabelY() - 2, 0x336A90B5);
 		if (layout.statusSeparatorY() < bottom - 12) {
 			guiGraphics.fill(left + 16, layout.statusSeparatorY(), right - 16, layout.statusSeparatorY() + 1, 0x33577EA3);
 		}
 
 		boolean tabInHeader = FilmingTabLayout.at(width, left, top, layout.panelWidth(), 1).inHeader();
-		int titleLeft = tabInHeader ? left + FilmingTabLayout.OPEN_WIDTH + 18 : layout.innerLeft();
+		int titleLeft = tabInHeader ? left + 2 * FilmingTabLayout.OPEN_WIDTH + 12 : layout.innerLeft();
 		int titleRight = layout.youtubeButtonLeft() - 6;
 		drawCenteredFittedString(guiGraphics, Component.translatable("screen.grand_builder.title"), (titleLeft + titleRight) / 2,
-			layout.titleY(), Math.max(20, titleRight - titleLeft), 0xFFF6FAFF);
+			layout.titleY(), Math.max(20, titleRight - titleLeft), theme.text);
 		renderEta(guiGraphics, layout);
 		if (layout.showSubtitle()) {
 			drawCenteredFittedString(guiGraphics, Component.translatable("screen.grand_builder.subtitle"), panelCenterX, layout.subtitleY(), layout.contentWidth(), 0xFFB3D2F0);
@@ -870,7 +890,7 @@ public class BuilderMenuScreen extends Screen {
 			line = Component.translatable("screen.grand_builder.eta_unavailable");
 			color = 0xFFB9D8F6;
 		} else line = Component.translatable("screen.grand_builder.eta_estimate", formatEtaTicks(estimate.etaTicks()));
-		drawFittedString(graphics,line,layout.innerLeft()+2,layout.etaY(),layout.contentWidth()-108,color);
+		drawFittedString(graphics,line,layout.innerLeft()+2,layout.etaY(),layout.contentWidth()-22,color);
 	}
 
 	private void renderLiveStatus(GuiGraphics guiGraphics, UiLayout layout) {

@@ -9,15 +9,21 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 
 final class FilmingTabButton extends Button {
-	private static final ItemStack ICON = new ItemStack(Items.SPYGLASS);
+	private final ItemStack icon;
+	private final String labelKey;
 	private final java.util.function.Supplier<FilmingTabLayout> layout;
 	private float expansion;
 	private long lastFrame = System.nanoTime();
 
 	FilmingTabButton(java.util.function.Supplier<FilmingTabLayout> layout, OnPress action) {
+		this(layout, action, new ItemStack(Items.SPYGLASS), "screen.grand_builder.filming.title", "screen.grand_builder.filming.tab");
+	}
+	FilmingTabButton(java.util.function.Supplier<FilmingTabLayout> layout, OnPress action, ItemStack icon, String titleKey, String labelKey) {
 		super(0, 0, FilmingTabLayout.CLOSED_WIDTH, FilmingTabLayout.HEIGHT,
-			Component.translatable("screen.grand_builder.filming.title"), action, DEFAULT_NARRATION);
+			Component.translatable(titleKey), action, DEFAULT_NARRATION);
 		this.layout = layout;
+		this.icon = icon;
+		this.labelKey = labelKey;
 		setTooltip(Tooltip.create(getMessage()));
 		position();
 	}
@@ -38,22 +44,28 @@ final class FilmingTabButton extends Button {
 		expansion += (target - expansion) * (float) (1 - Math.exp(-elapsed / 40));
 		if (Math.abs(target - expansion) < 0.01f) expansion = target;
 		FilmingTabLayout bounds = position();
-		graphics.fill(getX(), getY(), getRight(), getBottom(), isHoveredOrFocused() ? 0xFF729BB8 : 0xFF456783);
-		graphics.fill(getX() + 1, getY() + 1, getRight() - 1, getBottom() - 1, 0xFF172B3C);
+		BuilderTheme theme = BuilderTheme.current();
+		graphics.fill(getX(), getY(), getRight(), getBottom(), isHoveredOrFocused() ? theme.accent : theme.border);
+		graphics.fill(getX() + 1, getY() + 1, getRight() - 1, getBottom() - 1, theme.panelTop);
 		int iconX = bounds.opensLeft() ? getRight() - 17 : getX() + 1;
 		if (bounds.inHeader()) {
 			graphics.pose().pushMatrix();
 			graphics.pose().translate(iconX + 2, getY() + 1);
 			graphics.pose().scale(0.75f);
-			graphics.renderItem(ICON, 0, 0);
+			graphics.renderItem(icon, 0, 0);
 			graphics.pose().popMatrix();
-		} else graphics.renderItem(ICON, iconX, getY() + 2);
+		} else graphics.renderItem(icon, iconX, getY() + 2);
 		if (getWidth() > 25) {
 			int textLeft = bounds.opensLeft() ? getX() + 3 : getX() + 20;
 			int textRight = bounds.opensLeft() ? iconX - 1 : getRight() - 2;
+			var font = Minecraft.getInstance().font;
+			String caption = Component.translatable(labelKey).getString();
+			int space = textRight - textLeft;
+			if (space < font.width("...")) return;
+			if (font.width(caption) > space) caption = font.plainSubstrByWidth(caption, space - font.width("...")) + "...";
 			graphics.enableScissor(textLeft, getY(), textRight, getBottom());
-			graphics.drawString(Minecraft.getInstance().font, Component.translatable("screen.grand_builder.filming.tab"),
-				textLeft, getY() + (bounds.inHeader() ? 3 : 6), 0xFFFFDEA3);
+			graphics.drawString(font, caption,
+				textLeft, getY() + (bounds.inHeader() ? 3 : 6), theme.accent);
 			graphics.disableScissor();
 		}
 	}

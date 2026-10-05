@@ -12,15 +12,20 @@ import net.minecraft.network.chat.Component;
 public final class StructureInspectScreen extends Screen implements PreviewOrbit.View {
 	private final PreviewOrbit orbit=new PreviewOrbit();
 	private final int kind;
+	private final Screen parent;
 	private boolean previousHideGui;
-	public StructureInspectScreen(int kind) { super(Component.translatable("screen.grand_builder.inspect_title")); this.kind=kind; }
+	public StructureInspectScreen(int kind) { this(kind, null); }
+	public StructureInspectScreen(int kind, Screen parent) {
+		super(Component.translatable("screen.grand_builder.inspect_title")); this.kind=kind; this.parent=parent;
+	}
 	@Override protected void init() {
 		addRenderableWidget(Button.builder(Component.translatable("gui.back"),b -> onClose()).bounds(8,height-28,90,20).build());
 		addRenderableWidget(Button.builder(Component.translatable("screen.grand_builder.inspect_reset"),b -> orbit.reset()).bounds(width-118,height-28,110,20).build());
 	}
 	@Override public void render(GuiGraphics graphics,int mouseX,int mouseY,float partialTick) {
-		graphics.fill(0,0,width,26,0xB0172738);
-		graphics.drawCenteredString(font,title,width/2,9,0xFFE8F4FF);
+		BuilderTheme theme = BuilderTheme.current();
+		graphics.fill(0,0,width,26,theme.panelTop);
+		graphics.drawCenteredString(font,title,width/2,9,theme.text);
 		super.render(graphics,mouseX,mouseY,partialTick);
 	}
 	@Override public boolean mouseDragged(MouseButtonEvent event,double dx,double dy) {
@@ -31,10 +36,10 @@ public final class StructureInspectScreen extends Screen implements PreviewOrbit
 		orbit.zoom(vertical); return true;
 	}
 	@Override public void onClose() {
-		if (kind==StructurePreviewPayload.IMPORT) minecraft.setScreen(new WorldImportScreen());
+		if (kind==StructurePreviewPayload.IMPORT) minecraft.setScreen(parent != null ? parent : new WorldImportScreen());
 		else {
 			ClientPlayNetworking.send(new StructureInspectRequestPayload(""));
-			minecraft.setScreen(new BuilderMenuScreen());
+			minecraft.setScreen(parent != null ? parent : new BuilderMenuScreen());
 		}
 	}
 	@Override public boolean isPauseScreen() { return false; }

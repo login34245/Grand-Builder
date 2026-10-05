@@ -71,7 +71,7 @@ public final class WorldImportScreen extends Screen implements PreviewOrbit.View
 		}
 		int footerY=Math.max(boundsY+(compact()?3:6)*step+4,height-h-8);
 		int footerW=(content-8)/3;
-		Button view=button(Component.translatable("screen.grand_builder.import.view"),inner,footerY,footerW,h,b -> minecraft.setScreen(new StructureInspectScreen(StructurePreviewPayload.IMPORT)));
+		Button view=button(Component.translatable("screen.grand_builder.import.view"),inner,footerY,footerW,h,b -> minecraft.setScreen(new StructureInspectScreen(StructurePreviewPayload.IMPORT, this)));
 		this.saveButton=button(Component.translatable("screen.grand_builder.import.save"),inner+footerW+4,footerY,footerW,h,b -> send(WorldImportRequestPayload.SAVE));
 		button(Component.translatable("gui.back"),inner+(footerW+4)*2,footerY,content-(footerW+4)*2,h,b -> onClose());
 		boolean ready=state.selectedCandidate()>=0 && (state.status()==WorldImportStatePayload.READY || state.status()==WorldImportStatePayload.SAVED);
@@ -139,19 +139,20 @@ public final class WorldImportScreen extends Screen implements PreviewOrbit.View
 	}
 	@Override public void render(GuiGraphics graphics,int mouseX,int mouseY,float partialTick) {
 		int panel=panelWidth(),right=6+panel,h=rowHeight();
+		BuilderTheme theme = BuilderTheme.current();
 		graphics.fill(0,0,width,height,0x22060D14);
-		graphics.fill(3,3,right+2,height-3,0xD7284B69);
-		graphics.fill(6,6,right-1,height-6,0xE9172738);
-		graphics.drawString(font,title,16,11,0xFFE8F4FF);
+		graphics.fill(3,3,right+2,height-3,theme.border);
+		graphics.fill(6,6,right-1,height-6,theme.panelTop);
+		graphics.drawString(font,title,16,11,theme.text);
 		WorldImportStatePayload state=WorldImportClientState.snapshot();
 		String status=Component.translatable(copying ? "screen.grand_builder.import.copying" : copyFailed
 			? "screen.grand_builder.import.copy_failed" : "screen.grand_builder.import.status."+state.status()).getString();
-		graphics.drawString(font,font.plainSubstrByWidth(status,panel-24),16,23,0xFFB3D9EC);
+		graphics.drawString(font,font.plainSubstrByWidth(status,panel-24),16,23,theme.muted);
 		int candidateY=34+h+3+h+7;
 		if (state.selectedCandidate()>=0) {
 			WorldMapImporter.Bounds b=state.bounds();
 			String size=Component.translatable("screen.grand_builder.import.size",b.width(),b.height(),b.depth()).getString();
-			graphics.drawString(font,font.plainSubstrByWidth(size,panel-24),16,candidateY+h+4,0xFFE6D2A0);
+			graphics.drawString(font,font.plainSubstrByWidth(size,panel-24),16,candidateY+h+4,theme.accent);
 		}
 		int boundsY=candidateY+h+18, step=h<18?17:22;
 		String[] labels={"X-","X+","Y-","Y+","Z-","Z+"};
@@ -160,9 +161,9 @@ public final class WorldImportScreen extends Screen implements PreviewOrbit.View
 		for (int face=0;face<6;face++) {
 			int y=boundRow(face,boundsY,step)+4;
 			int columnX=boundX(face,16,panel-20), columnWidth=compact()?(panel-28)/2:panel-20;
-			graphics.drawString(font,labels[face],columnX,y,0xFFB8D8EC);
+			graphics.drawString(font,labels[face],columnX,y,theme.muted);
 			String value=Integer.toString(values[face]);
-			graphics.drawString(font,value,columnX+columnWidth-47-font.width(value),y,0xFFFFFFFF);
+			graphics.drawString(font,value,columnX+columnWidth-47-font.width(value),y,theme.text);
 		}
 		graphics.fill(15,boundsY-5,right-11,boundsY-4,0x667DA9C2);
 		super.render(graphics,mouseX,mouseY,partialTick);

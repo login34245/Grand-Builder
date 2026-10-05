@@ -178,7 +178,7 @@ public final class AnimatedBuildManager {
 		BlockPos origin = player.blockPosition().relative(facing, spawnDistance).below();
 		BuildBounds bounds = computeBuildBounds(origin, facing, blueprint);
 		if (!fitsWorldHeight(player.level(), bounds)) {
-			player.displayClientMessage(Component.translatable("message.grand_builder.bounds_height"), true);
+			showHeightBounds(player, bounds);
 			return;
 		}
 		if (!isWithinRadius(player.blockPosition(), bounds, config.maxBuildRadius)) {
@@ -259,7 +259,8 @@ public final class AnimatedBuildManager {
 			return;
 		}
 		BuildBounds confirmBounds = computeBuildBounds(preview.origin, preview.facing, preview.blocks);
-		if (!fitsWorldHeight(player.level(), confirmBounds) || !isWithinRadius(player.blockPosition(), confirmBounds, config.maxBuildRadius)) {
+		if (!fitsWorldHeight(player.level(), confirmBounds)) { showHeightBounds(player, confirmBounds); return; }
+		if (!isWithinRadius(player.blockPosition(), confirmBounds, config.maxBuildRadius)) {
 			player.displayClientMessage(Component.translatable("message.grand_builder.preview_move_blocked"), true);
 			return;
 		}
@@ -338,7 +339,8 @@ public final class AnimatedBuildManager {
 		};
 		GrandBuilderConfig config = GrandBuilderConfig.get();
 		BuildBounds bounds = computeBuildBounds(placement.origin(), placement.facing(), preview.blocks);
-		if (!fitsWorldHeight(player.level(), bounds) || !isWithinRadius(player.blockPosition(), bounds, config.maxBuildRadius)) {
+		if (!fitsWorldHeight(player.level(), bounds)) { preview.lastEditTick = now; showHeightBounds(player, bounds); return; }
+		if (!isWithinRadius(player.blockPosition(), bounds, config.maxBuildRadius)) {
 			preview.lastEditTick = now;
 			player.displayClientMessage(Component.translatable("message.grand_builder.preview_move_blocked"), true);
 			return;
@@ -709,6 +711,16 @@ public final class AnimatedBuildManager {
 		SPEED_BY_PLAYER.put(player.getUUID(), next);
 		if (showMessage) {
 			player.displayClientMessage(Component.translatable("message.grand_builder.speed_set", Component.translatable(next.translationKey()), getOptions(player.getUUID()).displayRate(getEffectMode(player.getUUID()), next)), true);
+		}
+		sendBuildStatus(player, false);
+	}
+
+	public static void applyDefaults(ServerPlayer player, BuildSpeed speed, boolean terrainEnabled) {
+		UUID id = player.getUUID();
+		// Opening settings must never retime a running job or alter a prepared preview.
+		if (findJob(id) == null && !PENDING_PREVIEW_BY_PLAYER.containsKey(id) && checkCanUse(player, false, false)) {
+			SPEED_BY_PLAYER.put(id, speed);
+			TERRAIN_ADAPTATION_BY_PLAYER.put(id, terrainEnabled);
 		}
 		sendBuildStatus(player, false);
 	}
@@ -1820,7 +1832,11 @@ public final class AnimatedBuildManager {
 	}
 
 	private static boolean fitsWorldHeight(ServerLevel level, BuildBounds bounds) {
-		return bounds.minY() >= level.getMinY() && bounds.maxY() < level.getMaxY();
+		return WorldHeightBounds.contains(level, bounds.minY(), bounds.maxY());
+	}
+	private static void showHeightBounds(ServerPlayer player, BuildBounds bounds) {
+		player.displayClientMessage(Component.translatable("message.grand_builder.bounds_height_details",
+			bounds.minY(), bounds.maxY(), player.level().getMinY(), player.level().getMaxY() - 1), true);
 	}
 
 	private static boolean isWithinRadius(BlockPos playerPos, BuildBounds bounds, int maxRadius) {
