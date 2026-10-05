@@ -139,8 +139,12 @@ public final class AnimatedBuildManager {
 	}
 
 	public static void preparePreview(ServerPlayer player) {
+		LargePreviewGuard.cancel(player.getUUID());
+		preparePreview(player, false);
+	}
+	private static void preparePreview(ServerPlayer player, boolean acceptedLarge) {
 		GrandBuilderConfig config = GrandBuilderConfig.get();
-		if (!checkCanUse(player, true, true) || !allowActionNow(player, false)) {
+		if (!checkCanUse(player, true, true) || !acceptedLarge && !allowActionNow(player, false)) {
 			return;
 		}
 		if (findJob(player.getUUID()) != null) {
@@ -154,6 +158,12 @@ public final class AnimatedBuildManager {
 		}
 
 		List<GrandPalaceBlueprint.RelativeBlock> blueprint = selection.blueprint();
+		String key = getSelectionKey(player.getUUID());
+		BuildEffectMode selectedMode = getEffectMode(player.getUUID());
+		BuildOptions selectedOptions = getOptions(player.getUUID());
+		if (!acceptedLarge && LargePreviewGuard.request(player, key, selection.structure().displayName(), blueprint, LargePreviewGuard.BUILD,
+			() -> key.equals(getSelectionKey(player.getUUID())) && selectedMode == getEffectMode(player.getUUID())
+				&& selectedOptions.equals(getOptions(player.getUUID())), () -> preparePreview(player, true))) return;
 		if (blueprint.size() > config.maxBlocksPerBuild) {
 			player.displayClientMessage(Component.translatable("message.grand_builder.limit_blocks", blueprint.size(), config.maxBlocksPerBuild), true);
 			return;
@@ -291,6 +301,7 @@ public final class AnimatedBuildManager {
 	}
 
 	public static void cancelPreview(ServerPlayer player) {
+		LargePreviewGuard.cancel(player.getUUID());
 		if (!allowActionNow(player, false)) {
 			return;
 		}
@@ -817,7 +828,14 @@ public final class AnimatedBuildManager {
 				owner.displayClientMessage(Component.translatable("message.grand_builder.owner_back_resume"), true);
 			}
 
-			boolean finished = job.tick(level, owner, getSpeed(job.ownerId), config);
+			boolean finished;
+			try { finished = job.tick(level, owner, getSpeed(job.ownerId), config); }
+			catch (CompactSnapshotMap.BudgetExceeded exception) {
+				job.paused = true;
+				job.restoreClockworkTime(level);
+				if (owner != null) owner.displayClientMessage(Component.translatable("message.grand_builder.build_memory_limit"), false);
+				finished = false;
+			}
 			if (!finished && (job.scenePulse++ % 10) == 0) {
 				job.syncScene(level, job.paused || job.pausedByOffline || job.waitingForChunks);
 			}
@@ -1024,9 +1042,18 @@ public final class AnimatedBuildManager {
 		}
 
 		GrandBuilderConfig config = GrandBuilderConfig.get();
-		List<GrandPalaceBlueprint.RelativeBlock> finalBlueprint = new ArrayList<>(blueprint);
+		boolean compact = blueprint instanceof DenseStructureBlueprint && blueprint.size() > 200_000;
+		if (effectMode == BuildEffectMode.DISMANTLE && (long)blueprint.size() * 256 > DenseStructureBlueprint.memoryBudget()) {
+			player.displayClientMessage(Component.translatable("message.grand_builder.dismantle_memory_limit"), false);
+			return null;
+		}
+		if (effectMode == BuildEffectMode.DISMANTLE) compact = false;
+		List<GrandPalaceBlueprint.RelativeBlock> finalBlueprint = compact ? blueprint : new ArrayList<>(blueprint);
 		int terrainBlocksAdded = 0;
-		if (!options.clearsSite() && effectMode != BuildEffectMode.DISMANTLE && isTerrainAdaptationEnabled(player.getUUID())) {
+		if (compact && !options.clearsSite() && isTerrainAdaptationEnabled(player.getUUID())) {
+			player.displayClientMessage(Component.translatable("message.grand_builder.large_terrain_skipped"), false);
+		}
+		if (!compact && !options.clearsSite() && effectMode != BuildEffectMode.DISMANTLE && isTerrainAdaptationEnabled(player.getUUID())) {
 			List<GrandPalaceBlueprint.RelativeBlock> terrainBlocks = generateTerrainAdaptationBlocks(player.level(), finalBlueprint, origin, facing, config);
 			terrainBlocksAdded = terrainBlocks.size();
 			if (!terrainBlocks.isEmpty()) {
@@ -1034,7 +1061,7 @@ public final class AnimatedBuildManager {
 			}
 		}
 
-		finalBlueprint.sort(BLOCK_BUILD_ORDER);
+		if (!compact) finalBlueprint.sort(BLOCK_BUILD_ORDER);
 		if (finalBlueprint.size() > config.maxBlocksPerBuild) {
 			player.displayClientMessage(Component.translatable("message.grand_builder.limit_blocks", finalBlueprint.size(), config.maxBlocksPerBuild), true);
 			return null;
@@ -1044,8 +1071,13 @@ public final class AnimatedBuildManager {
 		}
 
 		BuildBounds effectBounds = computeBuildBounds(origin, facing, finalBlueprint);
-		RollbackData rollbackData = captureRollbackSnapshot(player.level(), player.level().dimension(), structureName, origin, facing, finalBlueprint, options);
-		return new BuildJob(player.level().dimension(), origin, facing, player.getUUID(), structureName, finalBlueprint, rollbackData, effectMode, effectBounds, options);
+		try {
+			RollbackData rollbackData = captureRollbackSnapshot(player.level(), player.level().dimension(), structureName, origin, facing, finalBlueprint, options);
+			return new BuildJob(player.level().dimension(), origin, facing, player.getUUID(), structureName, finalBlueprint, rollbackData, effectMode, effectBounds, options);
+		} catch (CompactSnapshotMap.BudgetExceeded | IllegalArgumentException exception) {
+			player.displayClientMessage(Component.translatable("message.grand_builder.build_memory_limit"), false);
+			return null;
+		}
 	}
 
 	private static List<GrandPalaceBlueprint.RelativeBlock> mergeBlueprintBlocks(
@@ -1628,8 +1660,9 @@ public final class AnimatedBuildManager {
 		List<GrandPalaceBlueprint.RelativeBlock> blocks,
 		BuildOptions options
 	) {
-		Map<BlockPos, SnapshotBlock> snapshot = new HashMap<>();
-		if (options.clearsSite()) return new RollbackData(dimensionKey, structureName, origin, snapshot);
+		Map<BlockPos, SnapshotBlock> snapshot = blocks instanceof DenseStructureBlueprint
+			? new CompactSnapshotMap(Math.min(512L * 1024 * 1024, Runtime.getRuntime().maxMemory() / 8)) : new HashMap<>();
+		if (options.clearsSite() || blocks instanceof DenseStructureBlueprint) return new RollbackData(dimensionKey, structureName, origin, snapshot);
 		for (GrandPalaceBlueprint.RelativeBlock block : blocks) {
 			BlockPos targetPos = transform(origin, facing, block);
 			if (!level.isInWorldBounds(targetPos) || !level.isLoaded(targetPos)) {
@@ -1882,7 +1915,7 @@ public final class AnimatedBuildManager {
 	private record RollbackData(ResourceKey<Level> dimensionKey, Component structureName, BlockPos anchor, Map<BlockPos, SnapshotBlock> snapshot) {
 	}
 
-	private record SnapshotBlock(BlockState state, CompoundTag blockEntityNbt) {
+	record SnapshotBlock(BlockState state, CompoundTag blockEntityNbt) {
 	}
 
 	private static final class ColumnInfo {
@@ -1947,7 +1980,7 @@ public final class AnimatedBuildManager {
 			int localMaxZ = 0;
 			boolean first = true;
 
-			for (GrandPalaceBlueprint.RelativeBlock block : blocks) {
+			for (GrandPalaceBlueprint.RelativeBlock block : StructureLibrary.boundaryBlocks(blocks)) {
 				BlockPos transformed = transform(BlockPos.ZERO, facing, block);
 				if (first) {
 					localMinX = transformed.getX();
@@ -1975,29 +2008,14 @@ public final class AnimatedBuildManager {
 			this.maxZ = localMaxZ;
 			this.pivot = origin.offset(Math.floorDiv(localMinX + localMaxX, 2), 0, Math.floorDiv(localMinZ + localMaxZ, 2));
 
-			List<Integer> previewCandidates = new ArrayList<>(blocks.size());
-			for (int i = 0; i < blocks.size(); i++) {
-				if (!blocks.get(i).state().isAir()) {
-					previewCandidates.add(i);
-				}
-			}
-			this.estimatedBlocks = effectMode == BuildEffectMode.DISMANTLE ? previewCandidates.size() : totalBlocks;
-			if (previewCandidates.isEmpty()) {
-				for (int i = 0; i < blocks.size(); i++) {
-					previewCandidates.add(i);
-				}
-			}
-
-			int effectiveCap = Math.max(1, sampleCap);
-			int step = Math.max(1, (previewCandidates.size() + effectiveCap - 1) / effectiveCap);
-			int sampleCount = Math.max(1, (previewCandidates.size() + step - 1) / step);
-			this.sampledBlockIndexes = new int[sampleCount];
-			int sampleIndex = 0;
-			for (int i = 0; i < previewCandidates.size() && sampleIndex < sampleCount; i += step) {
-				this.sampledBlockIndexes[sampleIndex++] = previewCandidates.get(i);
-			}
-			if (sampleIndex == 0 && !blocks.isEmpty()) {
-				this.sampledBlockIndexes[0] = 0;
+			this.estimatedBlocks = effectMode == BuildEffectMode.DISMANTLE ? StructureLibrary.countNonAir(blocks) : totalBlocks;
+			int cap = Math.max(1, sampleCap), solid = StructureLibrary.countNonAir(blocks);
+			if (blocks instanceof DenseStructureBlueprint dense) this.sampledBlockIndexes = dense.sampleNonAirIndexes(cap);
+			else {
+				int stride = Math.max(1, (Math.max(1, solid) + cap - 1) / cap), cursor = 0, seen = 0;
+				this.sampledBlockIndexes = new int[Math.max(1, (solid + stride - 1) / stride)];
+				for (int i = 0; i < blocks.size(); i++) if (!blocks.get(i).state().isAir() && seen++ % stride == 0)
+					sampledBlockIndexes[cursor++] = i;
 			}
 			this.conflictSampleIndexes = sampleConflictIndexes(level, config);
 		}
@@ -2243,13 +2261,20 @@ public final class AnimatedBuildManager {
 			this.facing = facing;
 			this.ownerId = ownerId;
 			this.structureName = structureName;
-			this.dryBlocks = new ArrayList<>();
-			this.fluidBlocks = new ArrayList<>();
-			for (GrandPalaceBlueprint.RelativeBlock block : blocks) {
-				if (block.state().getFluidState().isEmpty()) {
-					this.dryBlocks.add(block);
-				} else {
-					this.fluidBlocks.add(block);
+			if (blocks instanceof DenseStructureBlueprint dense) {
+				try {
+					DenseBuildPlan plan = new DenseBuildPlan(dense, effectMode == BuildEffectMode.REVERSE ? options.startSide() : null);
+					this.dryBlocks = plan.dry(); this.fluidBlocks = plan.fluid();
+				} catch (java.io.IOException exception) { throw new IllegalArgumentException(exception); }
+			} else {
+				this.dryBlocks = new ArrayList<>();
+				this.fluidBlocks = new ArrayList<>();
+				for (GrandPalaceBlueprint.RelativeBlock block : blocks) {
+					if (block.state().getFluidState().isEmpty()) {
+						this.dryBlocks.add(block);
+					} else {
+						this.fluidBlocks.add(block);
+					}
 				}
 			}
 			this.rollbackData = rollbackData;
@@ -2259,7 +2284,7 @@ public final class AnimatedBuildManager {
 			this.clearTask = new SiteClearTask(new SiteClearVolume(new BlockPos(effectBounds.minX(), effectBounds.minY(), effectBounds.minZ()),
 				new BlockPos(effectBounds.maxX(), effectBounds.maxY(), effectBounds.maxZ())));
 			this.clearFinished = !this.options.clearsSite();
-			if (effectMode == BuildEffectMode.REVERSE) {
+			if (effectMode == BuildEffectMode.REVERSE && !(blocks instanceof DenseStructureBlueprint)) {
 				this.dryBlocks.sort(this.options.startSide().comparator());
 				this.fluidBlocks.sort(this.options.startSide().comparator());
 			}
@@ -2285,15 +2310,16 @@ public final class AnimatedBuildManager {
 			if (kineticCells == null) {
 				if (!kineticChunksReady(level, GrandBuilderConfig.get())) return;
 				Set<Long> opaque = new HashSet<>();
-				for (int i = 0; i < totalBlocks; i++) {
+				for (int i = 0; totalBlocks <= 200_000 && i < totalBlocks; i++) {
 					GrandPalaceBlueprint.RelativeBlock block = blockAt(i);
 					if (!isTerrainOperation(block.stage()) && block.state().isSolidRender()) opaque.add(transform(origin, facing, block).asLong());
 				}
 				List<Integer> candidates = new ArrayList<>();
-				for (int i = 0; i < totalBlocks; i++) {
+				int candidateStep = totalBlocks > 200_000 ? Math.max(1, (totalBlocks + KineticBuildPayload.MAX_CELLS - 1) / KineticBuildPayload.MAX_CELLS) : 1;
+				for (int i = 0; i < totalBlocks; i += candidateStep) {
 					GrandPalaceBlueprint.RelativeBlock block = blockAt(i);
 					BlockPos target = transform(origin, facing, block);
-					boolean enclosed = block.state().isSolidRender();
+					boolean enclosed = totalBlocks <= 200_000 && block.state().isSolidRender();
 					if (enclosed) for (Direction side : Direction.values()) {
 						if (!opaque.contains(target.relative(side).asLong())) { enclosed = false; break; }
 					}
@@ -2331,10 +2357,8 @@ public final class AnimatedBuildManager {
 			if (!config.pauseWhenChunksMissing) return true;
 			if (kineticChunks == null) {
 				Set<BlockPos> chunks = new HashSet<>();
-				for (int i = 0; i < totalBlocks; i++) {
-					BlockPos target = transform(origin, facing, blockAt(i));
-					if (level.isInWorldBounds(target)) chunks.add(new BlockPos(target.getX() & ~15, 0, target.getZ() & ~15));
-				}
+				for (int x = effectBounds.minX() & ~15; x <= effectBounds.maxX(); x += 16)
+					for (int z = effectBounds.minZ() & ~15; z <= effectBounds.maxZ(); z += 16) chunks.add(new BlockPos(x, 0, z));
 				kineticChunks = List.copyOf(chunks);
 			}
 			for (BlockPos chunk : kineticChunks) if (!level.isLoaded(chunk)) return false;
@@ -2918,7 +2942,11 @@ public final class AnimatedBuildManager {
 			if (check != PlacementResult.READY) return check;
 			BlockPos targetPos = transform(origin, facing, block);
 			BlockState rotatedState = rotateState(block.state(), facing);
-			if (options.clearsSite() && rollbackData != null && !rollbackData.snapshot().containsKey(targetPos))
+			// Identical air still consumes the normal cadence, but needs no undo entry or mutation.
+			if ((effectMode != BuildEffectMode.DISMANTLE || !dismantlePrepared) && !rotatedState.hasBlockEntity()
+				&& rotatedState.equals(level.getBlockState(targetPos))) return PlacementResult.PLACED;
+			if ((options.clearsSite() || rollbackData != null && rollbackData.snapshot() instanceof CompactSnapshotMap)
+				&& rollbackData != null && !rollbackData.snapshot().containsKey(targetPos))
 				rollbackData.snapshot().put(targetPos, new SnapshotBlock(level.getBlockState(targetPos), captureBlockEntityData(level, targetPos)));
 			if (effectMode == BuildEffectMode.DISMANTLE && dismantlePrepared) {
 				SnapshotBlock original = dismantleOriginals.get(targetPos);

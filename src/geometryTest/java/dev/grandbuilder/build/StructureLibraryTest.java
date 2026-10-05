@@ -25,6 +25,10 @@ public final class StructureLibraryTest {
 		SharedConstants.tryDetectVersion();
 		Bootstrap.bootStrap();
 		verifyDense();
+		verifyCompactOrders();
+		verifyLitematic();
+		verifySnapshots();
+		verifyLimits();
 		Path temp = Files.createTempDirectory("grand-builder-library-test-");
 		try { verifyCatalog(temp); verifyRawNbt(temp); }
 		finally {
@@ -44,7 +48,7 @@ public final class StructureLibraryTest {
 		CompoundTag chest = new CompoundTag();
 		chest.putString("id", "minecraft:chest"); chest.putString("CustomName", "Library QA");
 		var palette = Map.of(0, Blocks.AIR.defaultBlockState(), 1, Blocks.CHEST.defaultBlockState());
-		var entities = Map.of(BlockPos.asLong(1, 1, 1), chest);
+		var entities = Map.of((1L * sz + 1) * sx + 1, chest);
 		var dense = DenseStructureBlueprint.sponge(sx, sy, sz, palette, data, entities, false, 1000);
 		check(dense.size() == 24 && dense.nonAirCount() == 2, "Trimmed volume or internal air changed");
 		List<GrandPalaceBlueprint.RelativeBlock> expected = new ArrayList<>();
@@ -52,7 +56,7 @@ public final class StructureLibraryTest {
 			int rx = x - 1, rz = z - 2, index = ((y + 1) * sz + z + 1) * sx + x + 1;
 			int stage = y * 120 + (int)Math.round(Math.hypot(rx, rz) * 8) + Math.floorMod(rx * 5 - rz * 3, 11);
 			expected.add(new GrandPalaceBlueprint.RelativeBlock(rx, y, rz, palette.get((int)data[index]), stage,
-				entities.get(BlockPos.asLong(x + 1, y + 1, z + 1))));
+				entities.get(((long)(y + 1) * sz + z + 1) * sx + x + 1)));
 		}
 		expected.sort(Comparator.comparingInt(GrandPalaceBlueprint.RelativeBlock::stage));
 		check(dense.equals(expected), "Compact decoding changed coordinates, stable stage order or block NBT");
@@ -84,6 +88,127 @@ public final class StructureLibraryTest {
 		reject(() -> DenseStructureBlueprint.checkedVolume(65535, 65535, 65535, 50_000_000));
 		reject(() -> DenseStructureBlueprint.checkedVolume(-1, 20, 20, 1000));
 		reject(() -> DenseStructureBlueprint.sponge(50_000_000, 1, 1, palette, new byte[] {1}, Map.of(), false, 50_000_000));
+	}
+
+	private static void verifyCompactOrders() throws Exception {
+		for (int[] size : List.of(new int[] {1, 1, 1}, new int[] {7, 4, 5}, new int[] {103, 5, 57}, new int[] {2, 20, 3})) {
+			int w = size[0], h = size[1], d = size[2], total = w * h * d;
+			byte[] data = new byte[total];
+			for (int i = 0; i < total; i++) data[i] = (byte)(i % 3);
+			if (total == 1) data[0] = 1;
+			var source = DenseStructureBlueprint.sponge(w, h, d, Map.of(0, Blocks.AIR.defaultBlockState(),
+				1, Blocks.BRICKS.defaultBlockState(), 2, Blocks.WATER.defaultBlockState()), data, Map.of(), true, 1_000_000);
+			List<GrandPalaceBlueprint.RelativeBlock> expected = new ArrayList<>();
+			for (int i = 0; i < total; i++) expected.add(source.atFlat(i));
+			var library = new ArrayList<>(expected);
+			library.sort(Comparator.comparingInt(GrandPalaceBlueprint.RelativeBlock::stage));
+			check(source.equals(library), "Compact column order differs at " + Arrays.toString(size));
+			for (boolean xFirst : new boolean[] {false, true}) {
+				var order = new CompactStageOrder(w, h, d, xFirst);
+				for (int i = 0; i < total; i++) check(order.orderedIndex(order.flatIndex(i)) == i, "Compact rank inverse changed");
+			}
+			for (int mode = -1; mode < BuildStartSide.values().length; mode++) {
+				BuildStartSide side = mode < 0 ? null : BuildStartSide.values()[mode];
+				var plan = new DenseBuildPlan(source, side);
+				var comparator = side == null ? Comparator.comparingInt(GrandPalaceBlueprint.RelativeBlock::stage)
+					.thenComparingInt(GrandPalaceBlueprint.RelativeBlock::y).thenComparingInt(GrandPalaceBlueprint.RelativeBlock::x)
+					.thenComparingInt(GrandPalaceBlueprint.RelativeBlock::z) : side.comparator();
+				expected.sort(comparator);
+				check(plan.dry().equals(expected.stream().filter(block -> block.state().getFluidState().isEmpty()).toList()), "Dry compact view differs: " + side);
+				check(plan.fluid().equals(expected.stream().filter(block -> !block.state().getFluidState().isEmpty()).toList()), "Fluid compact view differs: " + side);
+			}
+			for (int cap : new int[] {1, 13, total}) {
+				var indices = source.sampleNonAirIndexes(cap);
+				check(indices.length <= cap && indices.length > 0, "Unbounded preview indices");
+				for (int index : indices) check(!source.get(index).state().isAir(), "Sampled preview air");
+				var surface = source.sampleSurface(cap);
+				check(surface.size() <= cap && surface.stream().noneMatch(block -> block.state().isAir()), "Unbounded surface sample");
+			}
+		}
+	}
+
+	private static CompoundTag litematicRegion(int sx, int sy, int sz, int px, int py, int pz, int[] values) {
+		CompoundTag region = new CompoundTag();
+		CompoundTag size = new CompoundTag(), pos = new CompoundTag();
+		size.putInt("x", sx); size.putInt("y", sy); size.putInt("z", sz);
+		pos.putInt("x", px); pos.putInt("y", py); pos.putInt("z", pz);
+		region.put("Size", size); region.put("Position", pos);
+		ListTag palette = new ListTag();
+		for (String id : List.of("minecraft:air", "minecraft:bricks", "minecraft:chest", "minecraft:water", "minecraft:stone")) {
+			CompoundTag state = new CompoundTag(); state.putString("Name", id); palette.add(state);
+		}
+		region.put("BlockStatePalette", palette);
+		long[] packed = new long[(values.length * 3 + 63) / 64];
+		for (int i = 0; i < values.length; i++) {
+			int bit = i * 3, word = bit / 64, shift = bit % 64;
+			packed[word] |= (long)values[i] << shift;
+			if (shift > 61) packed[word + 1] |= (long)values[i] >>> (64 - shift);
+		}
+		region.putLongArray("BlockStates", packed);
+		return region;
+	}
+	private static void verifyLitematic() throws Exception {
+		CompoundTag root = new CompoundTag(), regions = new CompoundTag(); root.put("Regions", regions);
+		int[] values = new int[4 * 3 * 6];
+		for (int i = 0; i < values.length; i++) values[i] = i % 5;
+		CompoundTag region = litematicRegion(-4, -3, -6, 100, 20, -10, values);
+		ListTag entities = new ListTag(); CompoundTag chest = new CompoundTag();
+		chest.putString("id", "minecraft:chest"); chest.putString("CustomName", "Negative corner");
+		chest.putInt("x", 2); chest.putInt("y", 0); chest.putInt("z", 0); entities.add(chest); region.put("TileEntities", entities);
+		regions.put("a", region);
+		var dense = StructureLibrary.denseLitematic(root, true);
+		var states = List.of(Blocks.AIR.defaultBlockState(), Blocks.BRICKS.defaultBlockState(), Blocks.CHEST.defaultBlockState(),
+			Blocks.WATER.defaultBlockState(), Blocks.STONE.defaultBlockState());
+		for (int i = 0; i < values.length; i++) check(dense.atFlat(i).state() == states.get(values[i]), "Negative region mirrored or packed word crossing failed");
+		check(dense.atFlat(2).blockEntityNbt().getStringOr("CustomName", "").equals("Negative corner"), "Negative region lost local tile coordinates");
+		regions.put("b", litematicRegion(2, 1, 1, 97, 18, -15, new int[] {4, 4}));
+		var overlap = StructureLibrary.denseLitematic(root, true);
+		check(overlap.atFlat(0).state() == Blocks.STONE.defaultBlockState() && overlap.atFlat(1).state() == Blocks.STONE.defaultBlockState(), "Overlap precedence changed");
+		regions.put("c", litematicRegion(1, 1, 1, 99, 18, -15, new int[] {0}));
+		check(StructureLibrary.denseLitematic(root, true).atFlat(2).blockEntityNbt() == null, "Overlapping air retained an obsolete tile");
+		regions.put("d", litematicRegion(1, 1, 1, 106, 18, -15, new int[] {1}));
+		var gap = StructureLibrary.denseLitematic(root, true);
+		check(gap.width() == 10 && gap.atFlat(7).state().isAir(), "Multi-region bounds or intervening air lost");
+		regions.put("bad", litematicRegion(1, 1, 1, 0, 0, 0, new int[] {7}));
+		reject(() -> StructureLibrary.denseLitematic(root, true));
+		regions.remove("bad");
+		region.putLongArray("BlockStates", new long[1]); reject(() -> StructureLibrary.denseLitematic(root, true));
+		var tallRoot = new CompoundTag(); var tallRegions = new CompoundTag(); tallRoot.put("Regions", tallRegions);
+		int[] tallValues = new int[5000]; tallValues[4999] = 2;
+		var tall = litematicRegion(1, 5000, 1, 0, 0, 0, tallValues);
+		var tallEntities = new ListTag(); var tallChest = chest.copy(); tallChest.putInt("x", 0); tallChest.putInt("y", 4999); tallEntities.add(tallChest);
+		tall.put("TileEntities", tallEntities); tallRegions.put("tall", tall);
+		check(StructureLibrary.denseLitematic(tallRoot, true).atFlat(4999).blockEntityNbt() != null, "Tall tile positions wrapped to twelve bits");
+	}
+	private static void verifySnapshots() {
+		var compact = new CompactSnapshotMap(8 * 1024 * 1024);
+		Map<BlockPos, AnimatedBuildManager.SnapshotBlock> expected = new java.util.HashMap<>();
+		for (int x = -16; x < 16; x++) for (int y = -16; y < 16; y++) for (int z = -16; z < 16; z++) {
+			var pos = new BlockPos(x, y, z);
+			var block = new AnimatedBuildManager.SnapshotBlock((x + y + z) % 3 == 0 ? Blocks.AIR.defaultBlockState() : Blocks.STONE.defaultBlockState(), null);
+			expected.put(pos, block); compact.put(pos, block);
+		}
+		CompoundTag nbt = new CompoundTag(); nbt.putString("id", "minecraft:chest");
+		var tile = new AnimatedBuildManager.SnapshotBlock(Blocks.CHEST.defaultBlockState(), nbt);
+		compact.put(BlockPos.ZERO, tile); expected.put(BlockPos.ZERO, tile);
+		check(compact.equals(expected) && expected.equals(compact), "Compact undo changed air/NBT/negative coordinates or iteration");
+		check(compact.retainedBytes() < expected.size() * 32L, "Undo still retains per-block objects");
+		var tiny = new CompactSnapshotMap(16_512);
+		tiny.put(BlockPos.ZERO, new AnimatedBuildManager.SnapshotBlock(Blocks.AIR.defaultBlockState(), null));
+		try { tiny.put(new BlockPos(16, 0, 0), tile); throw new AssertionError("Undo budget ignored"); }
+		catch (CompactSnapshotMap.BudgetExceeded expectedFailure) { check(tiny.size() == 1 && !tiny.containsKey(new BlockPos(16, 0, 0)), "Budget refusal mutated undo"); }
+	}
+	private static void verifyLimits() throws Exception {
+		check(DenseStructureBlueprint.checkedVolume(1000, 1000, 1000, 1_000_000_000) == 1_000_000_000, "Billion-cell cap missing");
+		reject(() -> DenseStructureBlueprint.checkedVolume(1001, 1000, 1000, 1_000_000_000));
+		var config = new dev.grandbuilder.config.GrandBuilderConfig();
+		var sanitize = config.getClass().getDeclaredMethod("sanitize"); sanitize.setAccessible(true);
+		config.maxBlocksPerBuild = 50_000_000; config.maxPreviewBlocks = 50_000_000; sanitize.invoke(config);
+		check(config.maxBlocksPerBuild == 1_000_000_000 && config.maxPreviewBlocks == 1_000_000_000, "Old defaults not migrated");
+		config.maxBlocksPerBuild = 123456; config.maxPreviewBlocks = 65432; sanitize.invoke(config);
+		check(config.maxBlocksPerBuild == 123456 && config.maxPreviewBlocks == 65432, "Custom server limits overwritten");
+		check(!LargePreviewGuard.needsWarning(4_999_999, 999_999) && LargePreviewGuard.needsWarning(5_000_000, 2)
+			&& LargePreviewGuard.needsWarning(1_000_001, 1_000_000), "Large preview warning thresholds changed");
 	}
 
 	private static CompoundTag fixture() {
@@ -183,6 +308,14 @@ public final class StructureLibraryTest {
 					net.minecraft.resources.Identifier.withDefaultNamespace("overworld"), new BlockPos(0,80,0), Direction.SOUTH, selected.blueprint());
 				check(preview.cells().size() > 1000 && preview.cells().size() <= StructurePreviewPayload.MAX_CELLS, "Large inspection is empty or unbounded");
 				System.out.println("Illinois 3D sample: " + preview.cells().size() + " cells");
+			}
+			if (selected.blueprint() instanceof DenseStructureBlueprint dense && dense.size() > 5_000_000) {
+				start = System.nanoTime();
+				var plan = new DenseBuildPlan(dense, null);
+				check(plan.dry().size() + plan.fluid().size() == dense.size(), "Real build lost air or fluid work");
+				check(plan.retainedBytes() < dense.size() / 2L, "Real build expanded into per-cell indices/objects");
+				check(!plan.dry().isEmpty() && plan.dry().getFirst().state().getFluidState().isEmpty(), "Real dry view starts with fluid");
+				System.out.printf("Compact build plan: %.1f MiB, %.2f s%n", plan.retainedBytes() / 1048576.0, (System.nanoTime() - start) / 1e9);
 			}
 			check(timestamp.equals(Files.getLastModifiedTime(path)) && Arrays.equals(hash,
 				MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(path))), "Source file changed");

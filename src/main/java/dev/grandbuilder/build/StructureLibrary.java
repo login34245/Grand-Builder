@@ -39,7 +39,7 @@ import org.slf4j.LoggerFactory;
 
 public final class StructureLibrary {
 	private static final Logger LOGGER = LoggerFactory.getLogger("grand_builder/structures");
-	private static final int MAX_DENSE_POSITIONS = 50_000_000;
+	private static final int MAX_DENSE_POSITIONS = 1_000_000_000;
 	private static final int MAX_MATERIALIZED_POSITIONS = 2_000_000;
 
 	private static final class Directories {
@@ -315,8 +315,10 @@ public final class StructureLibrary {
 			Path file = source.files().get(0).path();
 			String extension = extensionOf(file.getFileName().toString());
 			CompoundTag root = unwrapStructureRoot(readNbtAuto(file), extension);
-			if (isSponge(root, extension)) {
-				DenseStructureBlueprint blueprint = denseSponge(root, source.sourceToken().startsWith("world_"));
+			if (isSponge(root, extension) || extension.equals(".litematic")) {
+				boolean preserveCrop = source.sourceToken().startsWith("world_");
+				DenseStructureBlueprint blueprint = extension.equals(".litematic")
+					? denseLitematic(root, preserveCrop) : denseSponge(root, preserveCrop);
 				structure = new ExternalStructure(source.key(), source.displayName(),
 					spawnDistance(blueprint.width(), blueprint.height(), blueprint.depth()), blueprint, source.sourceToken());
 			} else {
@@ -372,10 +374,86 @@ public final class StructureLibrary {
 		ListTag tags = root.getListOrEmpty("BlockEntities");
 		if (tags.isEmpty()) tags = section.getListOrEmpty("BlockEntities");
 		Map<Long, CompoundTag> entities = new it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<>();
-		readBlockEntityMap(tags, 0, 0, 0, false).forEach((pos, tag) -> entities.put(BlockPos.asLong(pos.x(), pos.y(), pos.z()), tag));
+		int sx = root.getIntOr("Width", 0), sy = root.getIntOr("Height", 0), sz = root.getIntOr("Length", 0);
+		readBlockEntityMap(tags, 0, 0, 0, false).forEach((pos, tag) -> {
+			if (pos.x() >= 0 && pos.x() < sx && pos.y() >= 0 && pos.y() < sy && pos.z() >= 0 && pos.z() < sz)
+				entities.put(((long)pos.y() * sz + pos.z()) * sx + pos.x(), tag);
+		});
 		return DenseStructureBlueprint.sponge(root.getIntOr("Width", 0), root.getIntOr("Height", 0),
 			root.getIntOr("Length", 0), palette, data, entities, preserveCrop, MAX_DENSE_POSITIONS);
 	}
+
+	static DenseStructureBlueprint denseLitematic(CompoundTag root, boolean preserveCrop) throws IOException {
+		CompoundTag tags = root.getCompoundOrEmpty("Regions");
+		if (tags.isEmpty()) throw new IOException("Litematic has no regions");
+		List<CompactRegion> regions = new ArrayList<>();
+		List<BlockState> palette = new ArrayList<>(List.of(Blocks.AIR.defaultBlockState()));
+		Map<BlockState, Integer> paletteIds = new HashMap<>();
+		paletteIds.put(palette.getFirst(), 0);
+		long ax = Long.MAX_VALUE, ay = ax, az = ax, bx = Long.MIN_VALUE, by = bx, bz = bx, inputBytes = 0;
+		// Sorting names makes overlapping regions deterministic without allocating cell objects.
+		for (String name : tags.keySet().stream().sorted().toList()) {
+			CompoundTag region = tags.getCompoundOrEmpty(name);
+			Vec3i size = readVec3(region, "Size"), pos = readVec3(region, "Position");
+			if (size == null || pos == null || size.x() == Integer.MIN_VALUE || size.y() == Integer.MIN_VALUE || size.z() == Integer.MIN_VALUE)
+				throw new IOException("Invalid litematic region dimensions");
+			int sx = Math.abs(size.x()), sy = Math.abs(size.y()), sz = Math.abs(size.z());
+			int volume = DenseStructureBlueprint.checkedVolume(sx, sy, sz, MAX_DENSE_POSITIONS);
+			long x = (long)pos.x() + Math.min(0, size.x() + 1), y = (long)pos.y() + Math.min(0, size.y() + 1),
+				z = (long)pos.z() + Math.min(0, size.z() + 1);
+			ax = Math.min(ax, x); ay = Math.min(ay, y); az = Math.min(az, z);
+			bx = Math.max(bx, x + sx); by = Math.max(by, y + sy); bz = Math.max(bz, z + sz);
+			ListTag states = region.getListOrEmpty("BlockStatePalette");
+			if (states.isEmpty() || states.size() > 65536) throw new IOException("Invalid litematic palette size");
+			int[] remap = new int[states.size()];
+			for (int i = 0; i < remap.length; i++) {
+				BlockState state = readBlockState(states.getCompoundOrEmpty(i));
+				Integer id = paletteIds.get(state);
+				if (id == null) {
+					if (palette.size() == 65536) throw new IOException("Combined litematic palette is too large");
+					id = palette.size(); palette.add(state); paletteIds.put(state, id);
+				}
+				remap[i] = id;
+			}
+			long[] data = getLongArrayOrEmpty(region, "BlockStates");
+			int bits = bitsRequired(states.size());
+			if (data.length != ((long)volume * bits + 63) / 64) throw new IOException("Litematic block data length does not match its dimensions");
+			inputBytes += (long)data.length * 8;
+			regions.add(new CompactRegion(x, y, z, sx, sy, sz, volume, bits, remap, data, region.getListOrEmpty("TileEntities")));
+		}
+		if (bx - ax > Integer.MAX_VALUE || by - ay > Integer.MAX_VALUE || bz - az > Integer.MAX_VALUE)
+			throw new IOException("Litematic region bounds overflow");
+		int sx = (int)(bx - ax), sy = (int)(by - ay), sz = (int)(bz - az);
+		int volume = DenseStructureBlueprint.checkedVolume(sx, sy, sz, MAX_DENSE_POSITIONS);
+		DenseStructureBlueprint.checkMemory(sx, sy, sz, palette.size() <= 256 ? 1 : 2, inputBytes);
+		byte[] bytes = palette.size() <= 256 ? new byte[volume] : null;
+		short[] shorts = bytes == null ? new short[volume] : null;
+		Map<Long, CompoundTag> entities = new it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<>();
+		for (CompactRegion region : regions) {
+			int ox = (int)(region.x() - ax), oy = (int)(region.y() - ay), oz = (int)(region.z() - az);
+			// Native containers always run min-to-max, even when a region's signed Size is negative.
+			if (!entities.isEmpty()) entities.keySet().removeIf(key -> {
+				int x = (int)(key % sx), y = (int)(key / ((long)sx * sz)), z = (int)(key / sx % sz);
+				return x >= ox && x < ox + region.sx() && y >= oy && y < oy + region.sy() && z >= oz && z < oz + region.sz();
+			});
+			for (int i = 0; i < region.volume(); i++) {
+				int id = readPackedIndex(region.data(), region.bits(), i);
+				if (id < 0 || id >= region.remap().length) throw new IOException("Unknown litematic palette index " + id);
+				int target = ((i / (region.sx() * region.sz()) + oy) * sz + i / region.sx() % region.sz() + oz) * sx + i % region.sx() + ox;
+				if (bytes != null) bytes[target] = (byte)region.remap()[id]; else shorts[target] = (short)region.remap()[id];
+			}
+			for (int i = 0; i < region.entities().size(); i++) {
+				CompoundTag tag = region.entities().getCompoundOrEmpty(i);
+				Vec3i pos = readBlockEntityPos(tag);
+				if (pos == null || pos.x() < 0 || pos.x() >= region.sx() || pos.y() < 0 || pos.y() >= region.sy() || pos.z() < 0 || pos.z() >= region.sz()) continue;
+				CompoundTag normalized = normalizeBlockEntityTag(tag);
+				if (normalized != null) entities.put(((long)(pos.y() + oy) * sz + pos.z() + oz) * sx + pos.x() + ox, normalized);
+			}
+		}
+		return new DenseStructureBlueprint(sx, sy, sz, palette.toArray(BlockState[]::new), bytes, shorts, entities, preserveCrop);
+	}
+	private record CompactRegion(long x, long y, long z, int sx, int sy, int sz, int volume, int bits,
+		int[] remap, long[] data, ListTag entities) {}
 
 	public static int countNonAir(List<GrandPalaceBlueprint.RelativeBlock> blueprint) {
 		if (blueprint instanceof DenseStructureBlueprint dense) return dense.nonAirCount();
@@ -704,10 +782,13 @@ public final class StructureLibrary {
 			int sizeY = Math.abs(rawSizeY);
 			int sizeZ = Math.abs(rawSizeZ);
 
-			int posX = position.x();
-			int posY = position.y();
-			int posZ = position.z();
-			Map<Vec3i, CompoundTag> blockEntities = readBlockEntityMap(region.getListOrEmpty("TileEntities"), posX, posY, posZ, true);
+			int posX, posY, posZ;
+			try {
+				posX = Math.addExact(position.x(), Math.min(0, rawSizeX + 1));
+				posY = Math.addExact(position.y(), Math.min(0, rawSizeY + 1));
+				posZ = Math.addExact(position.z(), Math.min(0, rawSizeZ + 1));
+			} catch (ArithmeticException exception) { throw new IOException("Litematic region positions overflow", exception); }
+			Map<Vec3i, CompoundTag> blockEntities = readBlockEntityMap(region.getListOrEmpty("TileEntities"), posX, posY, posZ, false);
 
 			List<BlockState> palette = new ArrayList<>(paletteTag.size());
 			for (int i = 0; i < paletteTag.size(); i++) {
@@ -732,16 +813,6 @@ public final class StructureLibrary {
 				int x = index % sizeX;
 				int z = (index / sizeX) % sizeZ;
 				int y = index / (sizeX * sizeZ);
-
-				if (rawSizeX < 0) {
-					x = sizeX - 1 - x;
-				}
-				if (rawSizeY < 0) {
-					y = sizeY - 1 - y;
-				}
-				if (rawSizeZ < 0) {
-					z = sizeZ - 1 - z;
-				}
 
 				int worldX = posX + x;
 				int worldY = posY + y;

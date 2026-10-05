@@ -182,6 +182,10 @@ public final class WorldImportManager {
 			player.level().dimension().identifier(),min,max,states));
 	}
 	public static void inspect(ServerPlayer player, String structureKey) {
+		LargePreviewGuard.cancel(player.getUUID());
+		inspect(player, structureKey, false);
+	}
+	private static void inspect(ServerPlayer player, String structureKey, boolean acceptedLarge) {
 		if (!ServerPlayNetworking.canSend(player,StructurePreviewPayload.TYPE)) return;
 		if (structureKey.isEmpty()) { clearPreview(player,StructurePreviewPayload.INSPECT); return; }
 		StructureLibrary.ResolvedStructure structure=StructureLibrary.resolveSelection(structureKey);
@@ -193,6 +197,8 @@ public final class WorldImportManager {
 				structure.custom() ? "message.grand_builder.custom_missing" : "message.grand_builder.structure_load_failed", structure.displayName()),true);
 			return;
 		}
+		if (!acceptedLarge && LargePreviewGuard.request(player, structureKey, structure.displayName(), blocks,
+			LargePreviewGuard.INSPECT, () -> true, () -> inspect(player, structureKey, true))) return;
 		int radius=Math.max(12,structure.spawnDistance());
 		BlockPos anchor=player.blockPosition().relative(player.getDirection(),Math.min(80,radius));
 		ServerPlayNetworking.send(player,StructurePreviewSampler.blueprint(StructurePreviewPayload.INSPECT,

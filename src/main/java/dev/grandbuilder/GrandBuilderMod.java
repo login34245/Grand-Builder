@@ -123,6 +123,8 @@ public class GrandBuilderMod implements ModInitializer {
 		PayloadTypeRegistry.playS2C().register(WorldImportStatePayload.TYPE, WorldImportStatePayload.CODEC);
 		PayloadTypeRegistry.playC2S().register(FilmingToolsPayload.TYPE, FilmingToolsPayload.CODEC);
 		PayloadTypeRegistry.playS2C().register(FilmingStatePayload.TYPE, FilmingStatePayload.CODEC);
+		PayloadTypeRegistry.playS2C().register(dev.grandbuilder.network.LargePreviewWarningPayload.TYPE, dev.grandbuilder.network.LargePreviewWarningPayload.CODEC);
+		PayloadTypeRegistry.playC2S().register(dev.grandbuilder.network.LargePreviewConfirmPayload.TYPE, dev.grandbuilder.network.LargePreviewConfirmPayload.CODEC);
 
 		AttackBlockCallback.EVENT.register((player, world, hand, pos, direction) -> {
 			if (!player.getItemInHand(hand).is(STRUCTURE_SELECTOR)) {
@@ -186,12 +188,15 @@ public class GrandBuilderMod implements ModInitializer {
 		}));
 		ServerPlayNetworking.registerGlobalReceiver(StructureInspectRequestPayload.TYPE, (payload, context) ->
 			context.server().execute(() -> WorldImportManager.inspect(context.player(), payload.structureKey())));
+		ServerPlayNetworking.registerGlobalReceiver(dev.grandbuilder.network.LargePreviewConfirmPayload.TYPE, (payload, context) ->
+			context.server().execute(() -> dev.grandbuilder.build.LargePreviewGuard.confirm(context.player(), payload.token(), payload.accepted())));
 		ServerPlayNetworking.registerGlobalReceiver(WorldImportRequestPayload.TYPE, (payload, context) ->
 			context.server().execute(() -> WorldImportManager.handle(context.player(), payload)));
 		ServerPlayNetworking.registerGlobalReceiver(FilmingToolsPayload.TYPE, (payload, context) ->
 			context.server().execute(() -> FilmingToolsManager.handle(context.player(), payload)));
 
 		ServerTickEvents.END_SERVER_TICK.register(server -> {
+			dev.grandbuilder.build.LargePreviewGuard.expire();
 			AnimatedBuildManager.tick(server);
 			StructureSelectionManager.tick(server);
 		});
@@ -199,11 +204,13 @@ public class GrandBuilderMod implements ModInitializer {
 			AnimatedBuildManager.onPlayerDisconnect(handler.player);
 			WorldImportManager.onDisconnect(handler.player);
 			FilmingToolsManager.disconnect(handler.player.getUUID());
+			dev.grandbuilder.build.LargePreviewGuard.cancel(handler.player.getUUID());
 		}));
 		ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
 			AnimatedBuildManager.shutdown();
 			WorldImportManager.clear();
 			FilmingToolsManager.clear();
+			dev.grandbuilder.build.LargePreviewGuard.clear();
 		});
 
 		CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->

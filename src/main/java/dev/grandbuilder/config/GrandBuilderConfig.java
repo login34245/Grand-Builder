@@ -39,14 +39,14 @@ public final class GrandBuilderConfig {
 
 	public int actionCooldownTicks = 3;
 	public int maxConcurrentBuilds = 4;
-	public int maxBlocksPerBuild = 50000000;
+	public int maxBlocksPerBuild = 1_000_000_000;
 	public int maxBlocksPerTick = 512;
 	public int maxBuildRadius = 2048;
 	public int minSpawnDistance = 8;
 	public int maxSpawnDistance = 2048;
 	public int spawnDistancePadding = 5;
 
-	public int maxPreviewBlocks = 50000000;
+	public int maxPreviewBlocks = 1_000_000_000;
 	public int previewSampleCap = 1400;
 	public int previewParticlesPerTick = 180;
 	public int previewParticleIntervalTicks = 2;
@@ -159,7 +159,10 @@ public final class GrandBuilderConfig {
 
 		actionCooldownTicks = clamp(actionCooldownTicks, 0, 200);
 		maxConcurrentBuilds = clamp(maxConcurrentBuilds, 1, 64);
-		maxBlocksPerBuild = clamp(maxBlocksPerBuild, 256, 200_000_000);
+		// Migrate only the previous default; keep deliberate smaller server limits.
+		if (maxBlocksPerBuild == 50_000_000) maxBlocksPerBuild = 1_000_000_000;
+		if (maxPreviewBlocks == 50_000_000) maxPreviewBlocks = 1_000_000_000;
+		maxBlocksPerBuild = clamp(maxBlocksPerBuild, 256, 1_000_000_000);
 		maxBlocksPerTick = clamp(maxBlocksPerTick, 1, 4096);
 		// Upgrade legacy defaults so newer top speeds are not silently capped by old tick budget values.
 		if (maxBlocksPerTick <= 192 && (speedProfiles == null || !speedProfiles.containsKey("overdrive"))) {

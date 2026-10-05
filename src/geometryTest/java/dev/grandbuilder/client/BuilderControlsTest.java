@@ -26,6 +26,7 @@ public final class BuilderControlsTest {
 		verifyClearVolume();
 		verifyClearTask();
 		verifyCodec();
+		verifyLargePreviewCodec();
 		verifyFilming();
 		verifyTranslations();
 		Path temporary = Files.createTempDirectory("grand-builder-tips-test-");
@@ -38,6 +39,22 @@ public final class BuilderControlsTest {
 		System.out.println("Builder controls verified: short/rebound presses, bounded clearing/undo, 1/10-block moves, network codec, persisted 15-minute cooldown, opt-out and EN/RU tips.");
 	}
 
+	private static void verifyLargePreviewCodec() {
+		var warning = new dev.grandbuilder.network.LargePreviewWarningPayload(Long.MIN_VALUE + 137, 1, "Large schematic", 1_000_000_000, 700_000_000, 1_073_741_824L);
+		var buffer = new RegistryFriendlyByteBuf(Unpooled.buffer(), RegistryAccess.EMPTY);
+		try {
+			dev.grandbuilder.network.LargePreviewWarningPayload.CODEC.encode(buffer, warning);
+			check(dev.grandbuilder.network.LargePreviewWarningPayload.CODEC.decode(buffer).equals(warning) && !buffer.isReadable(), "Large warning codec changed counts/token");
+		} finally { buffer.release(); }
+		for (boolean accepted : new boolean[] {false, true}) {
+			var confirm = new dev.grandbuilder.network.LargePreviewConfirmPayload(warning.token(), accepted);
+			buffer = new RegistryFriendlyByteBuf(Unpooled.buffer(), RegistryAccess.EMPTY);
+			try {
+				dev.grandbuilder.network.LargePreviewConfirmPayload.CODEC.encode(buffer, confirm);
+				check(dev.grandbuilder.network.LargePreviewConfirmPayload.CODEC.decode(buffer).equals(confirm) && !buffer.isReadable(), "Large confirmation codec changed");
+			} finally { buffer.release(); }
+		}
+	}
 	private static void verifyShortPresses() {
 		var binding = new net.minecraft.client.KeyMapping("qa.grand_builder.vertical", org.lwjgl.glfw.GLFW.GLFW_KEY_PAGE_UP,
 			net.minecraft.client.KeyMapping.Category.MISC);

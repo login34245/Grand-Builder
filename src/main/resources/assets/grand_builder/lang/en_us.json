@@ -1,4 +1,13 @@
 {
+  "screen.grand_builder.large_preview_title": "Very large structure",
+  "screen.grand_builder.large_preview_text": "%s contains %s positions (including air) and %s non-air blocks. Previewing or building it can freeze or crash Minecraft, especially with shaders or limited memory. Save your world before continuing.",
+  "screen.grand_builder.large_preview_memory": " Compact schematic storage: %s MiB. The world, undo history and rendering need additional memory.",
+  "screen.grand_builder.large_preview_continue": "Continue anyway",
+  "message.grand_builder.large_preview_client": "Update Grand Builder on the client to confirm previewing this very large structure.",
+  "message.grand_builder.large_preview_expired": "The selection changed or confirmation expired. Open the preview again.",
+  "message.grand_builder.build_memory_limit": "Construction stopped before the next change: not enough safe memory for undo data. You can roll back the changes already made.",
+  "message.grand_builder.dismantle_memory_limit": "This structure is too large for dismantling with the current memory allocation. Use construction mode or a smaller crop.",
+  "message.grand_builder.large_terrain_skipped": "For this large schematic, automatic terrain preparation is skipped to keep memory bounded. The selected block policy still applies inside the build area.",
   "screen.grand_builder.filming.title": "Filming",
   "screen.grand_builder.filming.tab": "Film",
   "screen.grand_builder.filming.invisibility_on": "Invisibility",

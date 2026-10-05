@@ -102,6 +102,27 @@ public class GrandBuilderModClient implements ClientModInitializer {
 
 	@Override
 	public void onInitializeClient() {
+		ClientPlayNetworking.registerGlobalReceiver(dev.grandbuilder.network.LargePreviewWarningPayload.TYPE, (payload, context) ->
+			context.client().execute(() -> {
+				Minecraft client = context.client();
+				net.minecraft.client.gui.screens.Screen previous = client.screen;
+				String positions = String.format(java.util.Locale.US, "%,d", payload.positions());
+				String solid = String.format(java.util.Locale.US, "%,d", payload.nonAir());
+				Component text = Component.translatable("screen.grand_builder.large_preview_text", payload.name(), positions, solid);
+				if (payload.storageBytes() >= 0) text = text.copy().append(Component.translatable("screen.grand_builder.large_preview_memory",
+					String.format(java.util.Locale.US, "%.1f", payload.storageBytes() / 1048576.0)));
+				client.setScreen(new net.minecraft.client.gui.screens.ConfirmScreen(accepted -> {
+					ClientPlayNetworking.send(new dev.grandbuilder.network.LargePreviewConfirmPayload(payload.token(), accepted));
+					if (accepted) client.setScreen(previous);
+					else {
+						PreviewConfirmState.disarm();
+						if (payload.kind() == dev.grandbuilder.build.LargePreviewGuard.INSPECT)
+							ClientPlayNetworking.send(new dev.grandbuilder.network.StructureInspectRequestPayload(""));
+						client.setScreen(new BuilderMenuScreen());
+					}
+				}, Component.translatable("screen.grand_builder.large_preview_title"), text,
+					Component.translatable("screen.grand_builder.large_preview_continue"), Component.translatable("gui.cancel")));
+			}));
 		ClientPlayNetworking.registerGlobalReceiver(BuildStatusPayload.TYPE, (payload, context) ->
 			context.client().execute(() -> {
 				BuildStatusClientState.update(payload);

@@ -29,7 +29,7 @@ public final class StructurePreviewSampler {
 		}
 		// Huge mostly-air files should spend the visual budget on solid blocks, not empty cells.
 		List<GrandPalaceBlueprint.RelativeBlock> sample = blocks instanceof DenseStructureBlueprint dense
-			? dense.sampleNonAir(1_000_000) : blocks;
+			? dense.sampleSurface(262_144) : blocks;
 		if (sample != blocks) stride = 1;
 		for (int index = 0; index < sample.size(); index += stride) {
 			GrandPalaceBlueprint.RelativeBlock block = sample.get(index);

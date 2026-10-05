@@ -8,7 +8,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.RandomAccess;
-import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
@@ -19,7 +18,7 @@ final class DenseStructureBlueprint extends AbstractList<GrandPalaceBlueprint.Re
 	private final byte[] bytes;
 	private final short[] shorts;
 	private final BlockState[] palette;
-	private final int[] order;
+	private final CompactStageOrder order;
 	private final Long2ObjectOpenHashMap<CompoundTag> blockEntities;
 	private final int nonAirCount;
 
@@ -29,8 +28,7 @@ final class DenseStructureBlueprint extends AbstractList<GrandPalaceBlueprint.Re
 		int paletteSize = states.keySet().stream().mapToInt(Integer::intValue).max().orElse(-1) + 1;
 		if (paletteSize <= 0 || paletteSize > 65536) throw new IOException("Invalid schematic palette size");
 		int stateBytes = paletteSize <= 256 ? 1 : 2;
-		long estimated = (long)total * (stateBytes + 4) + data.length + 4L * (sy * 120L + 8L * Math.max(sx, sz) + 32 + (long)sx * sz);
-		if (estimated > memoryBudget()) throw new IOException("Schematic needs more than the safe decode memory budget (" + estimated / 1048576 + " MiB)");
+		checkMemory(sx, sy, sz, stateBytes, data.length);
 		BlockState[] palette = new BlockState[paletteSize];
 		for (var entry : states.entrySet()) {
 			if (entry.getKey() < 0) throw new IOException("Negative palette index");
@@ -64,9 +62,14 @@ final class DenseStructureBlueprint extends AbstractList<GrandPalaceBlueprint.Re
 		return (int)volume;
 	}
 
-	private static long memoryBudget() { return Math.min(256L * 1024 * 1024, Runtime.getRuntime().maxMemory() / 8); }
+	static long memoryBudget() { return Math.min(1024L * 1024 * 1024, Runtime.getRuntime().maxMemory() / 4); }
+	static void checkMemory(int x, int y, int z, int stateBytes, long inputBytes) throws IOException {
+		long estimated = (long)x * y * z * stateBytes + inputBytes + 16L * x * z
+			+ 16L * (y * 120L + 8L * Math.max(x, z) + 32);
+		if (estimated > memoryBudget()) throw new IOException("Schematic needs more than the safe decode memory budget (" + estimated / 1048576 + " MiB)");
+	}
 
-	private DenseStructureBlueprint(int sx, int sy, int sz, BlockState[] palette, byte[] bytes, short[] shorts,
+	DenseStructureBlueprint(int sx, int sy, int sz, BlockState[] palette, byte[] bytes, short[] shorts,
 		Map<Long, CompoundTag> entities, boolean preserveCrop) throws IOException {
 		this.sourceWidth = sx; this.sourceDepth = sz; this.palette = palette; this.bytes = bytes; this.shorts = shorts;
 		int ax = sx, ay = sy, az = sz, bx = -1, by = -1, bz = -1, solid = 0;
@@ -86,31 +89,21 @@ final class DenseStructureBlueprint extends AbstractList<GrandPalaceBlueprint.Re
 		this.width = bx - ax + 1; this.height = by - ay + 1; this.depth = bz - az + 1; this.nonAirCount = solid;
 		this.blockEntities = new Long2ObjectOpenHashMap<>();
 		entities.forEach((pos, tag) -> this.blockEntities.put((long)pos, tag.copy()));
-		this.order = new int[width * height * depth];
-		int maxStage = stage(width / 2 + 1, height - 1, depth / 2 + 1) + 12;
-		if (maxStage < 0 || maxStage > 16_000_000) throw new IOException("Structure stage range exceeds safe memory budget");
-		int[] histogram = new int[maxStage + 1];
-		int[] floorStages = new int[width * depth];
-		for (int z = 0; z < depth; z++) for (int x = 0; x < width; x++)
-			floorStages[z * width + x] = stage(x - width / 2, 0, z - depth / 2);
-		for (int y = 0; y < height; y++) for (int z = 0; z < depth; z++) for (int x = 0; x < width; x++)
-			histogram[y * 120 + floorStages[z * width + x]]++;
-		int start = 0;
-		for (int i = 0; i < histogram.length; i++) { int count = histogram[i]; histogram[i] = start; start += count; }
-		for (int y = 0; y < height; y++) for (int z = 0; z < depth; z++) for (int x = 0; x < width; x++) {
-			int index = ((y + minY) * sourceDepth + z + minZ) * sourceWidth + x + minX;
-			order[histogram[y * 120 + floorStages[z * width + x]]++] = index;
-		}
+		this.order = new CompactStageOrder(width, height, depth, false);
 	}
 
 	private int paletteIndex(int sourceIndex) { return bytes != null ? bytes[sourceIndex] & 255 : shorts[sourceIndex] & 65535; }
 	private static int stage(int x, int y, int z) { return y * 120 + (int)Math.round(Math.hypot(x, z) * 8) + Math.floorMod(x * 5 - z * 3, 11); }
-	@Override public int size() { return order.length; }
+	@Override public int size() { return width * height * depth; }
 	@Override public GrandPalaceBlueprint.RelativeBlock get(int index) {
-		Objects.checkIndex(index, order.length);
-		int source = order[index], sx = source % sourceWidth, sz = source / sourceWidth % sourceDepth, sy = source / (sourceWidth * sourceDepth);
+		return atFlat(order.flatIndex(index));
+	}
+	GrandPalaceBlueprint.RelativeBlock atFlat(int index) {
+		Objects.checkIndex(index, size());
+		int source = ((index / (width * depth) + minY) * sourceDepth + index / width % depth + minZ) * sourceWidth + index % width + minX;
+		int sx = source % sourceWidth, sz = source / sourceWidth % sourceDepth, sy = source / (sourceWidth * sourceDepth);
 		int x = sx - minX - width / 2, y = sy - minY, z = sz - minZ - depth / 2;
-		CompoundTag nbt = blockEntities.isEmpty() ? null : blockEntities.get(BlockPos.asLong(sx, sy, sz));
+		CompoundTag nbt = blockEntities.isEmpty() ? null : blockEntities.get((long)source);
 		return new GrandPalaceBlueprint.RelativeBlock(x, y, z, palette[paletteIndex(source)], stage(x, y, z), nbt);
 	}
 	int width() { return width; }
@@ -120,9 +113,9 @@ final class DenseStructureBlueprint extends AbstractList<GrandPalaceBlueprint.Re
 	List<GrandPalaceBlueprint.RelativeBlock> sampleNonAir(int cap) {
 		int stride = Math.max(1, (nonAirCount + cap - 1) / cap), solidIndex = 0;
 		List<GrandPalaceBlueprint.RelativeBlock> sample = new ArrayList<>(Math.min(nonAirCount, cap));
-		for (int i = 0; i < order.length; i++) {
-			if (palette[paletteIndex(order[i])].isAir()) continue;
-			if (solidIndex++ % stride == 0) sample.add(get(i));
+		for (int i = 0; i < size(); i++) {
+			if (stateAtFlat(i).isAir()) continue;
+			if (solidIndex++ % stride == 0) sample.add(atFlat(i));
 		}
 		return sample;
 	}
@@ -134,5 +127,38 @@ final class DenseStructureBlueprint extends AbstractList<GrandPalaceBlueprint.Re
 					corners.add(new GrandPalaceBlueprint.RelativeBlock(x, y, z, Blocks.AIR.defaultBlockState(), 0, null));
 		return corners;
 	}
-	long retainedBytes() { return (bytes != null ? bytes.length : (long)shorts.length * 2) + (long)order.length * 4; }
+	BlockState stateAtFlat(int i) {
+		int source = ((i / (width * depth) + minY) * sourceDepth + i / width % depth + minZ) * sourceWidth + i % width + minX;
+		return palette[paletteIndex(source)];
+	}
+	int[] sampleNonAirIndexes(int cap) {
+		int stride = Math.max(1, (nonAirCount + cap - 1) / cap), solid = 0, cursor = 0;
+		int[] indexes = new int[(nonAirCount + stride - 1) / stride];
+		for (int i = 0; i < size(); i++) if (!stateAtFlat(i).isAir() && solid++ % stride == 0) indexes[cursor++] = order.orderedIndex(i);
+		return indexes;
+	}
+	List<GrandPalaceBlueprint.RelativeBlock> sampleSurface(int cap) {
+		int[] sample = new int[Math.min(cap, nonAirCount)];
+		int seen = 0, area = width * depth;
+		long random = 0x54ad37ef982165abL;
+		for (int i = 0; i < size(); i++) {
+			BlockState state = stateAtFlat(i);
+			if (state.isAir()) continue;
+			int x = i % width, z = i / width % depth, y = i / area;
+			if (state.isSolidRender() && x > 0 && x + 1 < width && z > 0 && z + 1 < depth && y > 0 && y + 1 < height
+				&& stateAtFlat(i - 1).isSolidRender() && stateAtFlat(i + 1).isSolidRender()
+				&& stateAtFlat(i - width).isSolidRender() && stateAtFlat(i + width).isSolidRender()
+				&& stateAtFlat(i - area).isSolidRender() && stateAtFlat(i + area).isSolidRender()) continue;
+			seen++;
+			random ^= random << 13; random ^= random >>> 7; random ^= random << 17;
+			long slot = seen <= sample.length ? seen - 1 : (random & Long.MAX_VALUE) % seen;
+			if (slot < sample.length) sample[(int)slot] = i;
+		}
+		int count = Math.min(seen, sample.length);
+		java.util.Arrays.sort(sample, 0, count);
+		List<GrandPalaceBlueprint.RelativeBlock> result = new ArrayList<>(count);
+		for (int i = 0; i < count; i++) result.add(atFlat(sample[i]));
+		return result;
+	}
+	long retainedBytes() { return (bytes != null ? bytes.length : (long)shorts.length * 2) + order.retainedBytes(); }
 }
