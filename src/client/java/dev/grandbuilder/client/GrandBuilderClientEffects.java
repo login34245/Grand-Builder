@@ -201,7 +201,7 @@ public final class GrandBuilderClientEffects {
 			scene.payload = payload;
 			scene.staleTicks = 0;
 		}
-		if (BuildEffectMode.byNetworkId(payload.effectModeId()) == BuildEffectMode.SET_CHANGE) {
+		if (BuildEffectMode.byNetworkId(payload.effectModeId()).cinematic()) {
 			scene.age = scene.previousAge = Math.max(0, payload.ageTicks());
 			if (payload.phaseId() != BuildEffectPayload.PHASE_REVEAL && payload.phaseId() != BuildEffectPayload.PHASE_STOP)
 				scene.motionAge = scene.previousMotionAge = scene.age;
@@ -318,13 +318,20 @@ public final class GrandBuilderClientEffects {
 			}
 		}
 		// A previous build's outro must not reclaim the camera from a newer or paused job.
-		return latest == null || selected.mode() != BuildEffectMode.SET_CHANGE || latest.cameraDismissed
+		return latest == null || !selected.mode().cinematic() || latest.cameraDismissed
 			|| latest.payload.phaseId() == BuildEffectPayload.PHASE_PAUSED || latest.payload.phaseId() == BuildEffectPayload.PHASE_STOP
 			? null : selected;
 	}
 
 	public static void dismissCinematic(UUID ownerId) {
 		for (Scene scene : SCENES.values()) if (scene.payload.ownerId().equals(ownerId)) scene.cameraDismissed = true;
+		EuropaCinematic.stopSounds();
+	}
+
+	static UUID cinematicSceneId(UUID ownerId) {
+		UUID result = null;
+		for (Scene scene : SCENES.values()) if (scene.payload.ownerId().equals(ownerId)) result = scene.payload.sceneId();
+		return result;
 	}
 
 	private static ActorFrame actorFrame(Actor actor, float partialTick, float opacity, boolean ghost) {

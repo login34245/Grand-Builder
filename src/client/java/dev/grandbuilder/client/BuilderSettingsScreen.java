@@ -34,6 +34,8 @@ public final class BuilderSettingsScreen extends Screen {
 		bool(4, prefs.defaultTerrain(), prefs::setDefaultTerrain);
 		cycle(5, BuildEffectMode.values(), prefs.defaultEffect(), v -> Component.translatable(v.translationKey()), prefs::setDefaultEffect);
 		cycle(6, PlacementPolicy.values(), prefs.defaultPlacement(), v -> Component.translatable(v.translationKey()), prefs::setDefaultPlacement);
+		cycle(7, new Boolean[] { false, true }, prefs.effectList(), v -> Component.translatable(
+			v ? "screen.grand_builder.settings.list" : "screen.grand_builder.settings.cycle"), prefs::setEffectList);
 		int available = panelWidth - 24, half = (available - 4) / 2;
 		addRenderableWidget(Button.builder(Component.translatable("screen.grand_builder.settings.reset"), b -> {
 			prefs.resetDefaults(); rebuildWidgets();
@@ -61,7 +63,7 @@ public final class BuilderSettingsScreen extends Screen {
 		graphics.fill(left - 1, top - 1, left + panelWidth + 1, top + panelHeight + 1, theme.border);
 		graphics.fillGradient(left, top, left + panelWidth, top + panelHeight, theme.panelTop, theme.panelBottom);
 		ThemeText.centered(graphics, font, title, width / 2, top + 10, theme.text);
-		for (int row = 0; row < 7; row++) ThemeText.draw(graphics, font, fit(label(row), (panelWidth - 28) / 2),
+		for (int row = 0; row < BuilderSettingsLayout.ROWS; row++) ThemeText.draw(graphics, font, fit(label(row), (panelWidth - 28) / 2),
 			left + 12, layout.rowY(row) + (rowHeight - 8) / 2, theme.muted);
 		super.render(graphics, mouseX, mouseY, partialTick);
 	}

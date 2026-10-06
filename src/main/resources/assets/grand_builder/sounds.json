@@ -1,4 +1,9 @@
 {
+  "effect.europa_radio": {"subtitle": "subtitles.grand_builder.europa_radio", "sounds": ["grand_builder:effects/europa_radio"]},
+  "effect.europa_relay": {"subtitle": "subtitles.grand_builder.europa_relay", "sounds": ["grand_builder:effects/europa_relay"]},
+  "effect.europa_charge": {"subtitle": "subtitles.grand_builder.europa_charge", "sounds": ["grand_builder:effects/europa_charge"]},
+  "effect.europa_beam": {"subtitle": "subtitles.grand_builder.europa_beam", "sounds": ["grand_builder:effects/europa_beam"]},
+  "effect.europa_flash": {"subtitle": "subtitles.grand_builder.europa_flash", "sounds": ["grand_builder:effects/europa_flash"]},
   "effect.set_open": {"subtitle": "subtitles.grand_builder.set_open", "sounds": ["grand_builder:effects/set_open"]},
   "effect.set_snap": {"subtitle": "subtitles.grand_builder.set_snap", "sounds": ["grand_builder:effects/set_snap"]},
   "effect.set_finale": {"subtitle": "subtitles.grand_builder.set_finale", "sounds": ["grand_builder:effects/set_finale"]},

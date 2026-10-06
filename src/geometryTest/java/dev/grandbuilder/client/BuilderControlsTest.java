@@ -57,8 +57,8 @@ public final class BuilderControlsTest {
 			check(layout.left() >= 0 && layout.top() >= 0 && layout.left() + layout.width() <= size[0]
 				&& layout.top() + layout.height() <= size[1], "Settings panel left screen");
 			check(layout.rowHeight() >= 11, "Settings buttons cannot contain the font");
-			for (int row = 0; row < 7; row++) check(layout.rowY(row) + layout.rowHeight() <
-				(row == 6 ? layout.footerY() : layout.rowY(row + 1)), "Settings rows or footer overlap");
+			for (int row = 0; row < BuilderSettingsLayout.ROWS; row++) check(layout.rowY(row) + layout.rowHeight() <
+				(row == BuilderSettingsLayout.ROWS - 1 ? layout.footerY() : layout.rowY(row + 1)), "Settings rows or footer overlap");
 			check(layout.footerY() + 20 < layout.top() + layout.height(), "Settings footer left panel");
 		}
 	}
@@ -275,9 +275,10 @@ public final class BuilderControlsTest {
 			check(preferences.takeNextTip() == (i + 4) % BuilderTipPreferences.TIP_COUNT, "Tip cycle is not bounded");
 		preferences = new BuilderTipPreferences(file);
 		check(preferences.enabled() && preferences.takeAutomaticTip(now + 2 * cooldown + 1) == -1, "Final save did not retain settings");
-		check(preferences.theme() == BuilderTheme.CURRENT && !preferences.structureList() && !preferences.defaultTerrain()
+		check(preferences.theme() == BuilderTheme.CURRENT && !preferences.structureList() && !preferences.effectList() && !preferences.defaultTerrain()
 			&& preferences.defaultSpeed() == dev.grandbuilder.build.BuildSpeed.NORMAL, "Migration did not supply safe defaults");
 		preferences.setTheme(BuilderTheme.LIGHT); preferences.setStructureList(true); preferences.setDefaultTerrain(true);
+		preferences.setEffectList(true);
 		check(preferences.cinematicCamera(), "Existing preferences did not enable the optional new mode camera");
 		preferences.setCinematicCamera(false);
 		check(!BuilderTheme.LIGHT.textShadow() && BuilderTheme.CURRENT.textShadow() && BuilderTheme.DARK.textShadow(), "Light text keeps its dark shadow");
@@ -285,13 +286,13 @@ public final class BuilderControlsTest {
 		preferences.setDefaultEffect(dev.grandbuilder.build.BuildEffectMode.HEROBRINE);
 		preferences.setDefaultPlacement(dev.grandbuilder.build.PlacementPolicy.REPLACE);
 		preferences = new BuilderTipPreferences(file);
-		check(preferences.theme() == BuilderTheme.LIGHT && !preferences.cinematicCamera() && preferences.structureList() && preferences.defaultTerrain()
+		check(preferences.theme() == BuilderTheme.LIGHT && !preferences.cinematicCamera() && preferences.structureList() && preferences.effectList() && preferences.defaultTerrain()
 			&& preferences.defaultSpeed() == dev.grandbuilder.build.BuildSpeed.OVERDRIVE
 			&& preferences.defaultEffect() == dev.grandbuilder.build.BuildEffectMode.HEROBRINE
 			&& preferences.defaultPlacement() == dev.grandbuilder.build.PlacementPolicy.REPLACE, "Settings did not survive restart");
 		check(preferences.takeAutomaticTip(now + 2 * cooldown + 1) == -1, "Saving defaults erased tip cooldown");
 		preferences.resetDefaults(); preferences = new BuilderTipPreferences(file);
-		check(preferences.theme() == BuilderTheme.CURRENT && !preferences.defaultTerrain() && preferences.enabled()
+		check(preferences.theme() == BuilderTheme.CURRENT && !preferences.defaultTerrain() && !preferences.effectList() && preferences.enabled()
 			&& preferences.takeAutomaticTip(now + 2 * cooldown + 1) == -1, "Reset lost cooldown or safe defaults");
 		try (var files = Files.list(file.getParent())) { check(files.count() == 1, "Atomic save leaked temporary files"); }
 		Files.writeString(file, "{\"nextTip\":-1,\"lastShownAtMillis\":-5}");

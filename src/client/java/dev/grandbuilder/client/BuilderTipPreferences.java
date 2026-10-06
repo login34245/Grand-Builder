@@ -32,6 +32,7 @@ public final class BuilderTipPreferences {
 		int nextTip;
 		BuilderTheme theme = BuilderTheme.CURRENT;
 		boolean structureList;
+		boolean effectList;
 		boolean cinematicCamera = true;
 		BuildSpeed defaultSpeed = BuildSpeed.NORMAL;
 		boolean defaultTerrain;
@@ -64,6 +65,8 @@ public final class BuilderTipPreferences {
 
 	public BuilderTheme theme() { return settings.theme; }
 	public boolean structureList() { return settings.structureList; }
+	public boolean effectList() { return settings.effectList; }
+	public void setEffectList(boolean value) { settings.effectList = value; save(); }
 	public boolean cinematicCamera() { return settings.cinematicCamera; }
 	public void setCinematicCamera(boolean value) { settings.cinematicCamera = value; save(); }
 	public BuildSpeed defaultSpeed() { return settings.defaultSpeed; }

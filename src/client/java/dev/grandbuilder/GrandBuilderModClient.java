@@ -165,6 +165,7 @@ public class GrandBuilderModClient implements ClientModInitializer {
 
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
 			GrandBuilderClientEffects.tick(client);
+			dev.grandbuilder.client.EuropaCinematic.tick(client);
 			StructurePreviewClientState.tick(client);
 			while (FAST_PREVIEW_KEY.consumeClick()) { }
 			while (CINEMATIC_KEY.consumeClick()) if (client.player != null && client.screen == null)

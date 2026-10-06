@@ -48,6 +48,7 @@ public final class EffectGeometry {
 			case BUILDER_CHARGE -> builderCharge(mesh, frame);
 			case ORBITAL_STRIKE -> orbitalStrike(mesh, frame);
 			case SET_CHANGE -> SetChangeGeometry.emit(frame, mesh);
+			case EUROPA_CALL -> EuropaGeometry.site(frame, mesh);
 			case REVERSE -> directional(mesh, frame);
 			case FLYING_BLOCKS, REVERSE_COLLAPSE, ASSEMBLY_WORKSHOP, SCALE_MODEL -> KineticGeometry.emit(frame, mesh);
 			default -> { }
@@ -702,20 +703,20 @@ public final class EffectGeometry {
 		private Matrix4f matrix = new Matrix4f();
 		private final Vector3f point = new Vector3f();
 
-		private Mesh(Sink sink, float opacity) { this.sink=sink; this.opacity=opacity; }
+		Mesh(Sink sink, float opacity) { this.sink=sink; this.opacity=opacity; }
 		void push(double x, double y, double z) {
 			matrices.push(matrix);
 			matrix = new Matrix4f(matrix).translate((float)x, (float)y, (float)z);
 		}
 		void pop() { matrix=matrices.pop(); }
 		void rotate(double x, double y, double z) { matrix.rotateXYZ((float)x, (float)y, (float)z); }
-		private void scale(double value) { matrix.scale((float)value); }
-		private void vertex(Material material, double x, double y, double z, int rgb, double alpha) {
+		void scale(double value) { matrix.scale((float)value); }
+		void vertex(Material material, double x, double y, double z, int rgb, double alpha) {
 			matrix.transformPosition(point.set((float)x, (float)y, (float)z));
 			int a=(int)Math.round(clamp(alpha*opacity)*255.0);
 			sink.vertex(material, point.x, point.y, point.z, (a<<24)|(rgb&0xFFFFFF));
 		}
-		private void quad(Material material, double[] a, double[] b, double[] c, double[] d, int rgb, double alpha) {
+		void quad(Material material, double[] a, double[] b, double[] c, double[] d, int rgb, double alpha) {
 			vertex(material,a[0],a[1],a[2],rgb,alpha); vertex(material,b[0],b[1],b[2],rgb,alpha);
 			vertex(material,c[0],c[1],c[2],rgb,alpha); vertex(material,d[0],d[1],d[2],rgb,alpha);
 		}

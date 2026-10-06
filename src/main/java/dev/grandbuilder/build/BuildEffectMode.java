@@ -17,7 +17,8 @@ public enum BuildEffectMode {
 	ASSEMBLY_WORKSHOP("assembly_workshop", false, 0),
 	SCALE_MODEL("scale_model", false, 0),
 	ORBITAL_STRIKE("orbital_strike", true, 92),
-	SET_CHANGE("set_change", false, 0);
+	SET_CHANGE("set_change", false, 0),
+	EUROPA_CALL("europa_call", true, EuropaTimeline.ARRIVAL);
 
 	private final String key;
 	private final boolean instantReveal;
@@ -68,8 +69,11 @@ public enum BuildEffectMode {
 	}
 
 	public int aftermathTicks() {
+		if (this == EUROPA_CALL) return EuropaTimeline.AFTERMATH;
 		return this == SET_CHANGE ? 80 : this == ORBITAL_STRIKE ? 52 : this == BUILDER_CHARGE ? 44 : 28;
 	}
+
+	public boolean cinematic() { return this == SET_CHANGE || this == EUROPA_CALL; }
 
 	public int networkId() {
 		return ordinal();

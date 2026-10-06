@@ -198,10 +198,8 @@ public class BuilderMenuScreen extends Screen {
 				}));
 
 		this.effectButton = this.addRenderableWidget(Button.builder(fitButtonMessage(effectMessage(), layout.contentWidth()), button -> {
-			this.selectedEffectMode = this.selectedEffectMode.next();
-			this.selectedOptions = new BuildOptions(selectedOptions.startSide(), selectedOptions.dismantleStyle(), false, selectedOptions.placementPolicy());
-			setFittedMessage(this.effectButton, effectMessage());
-			updateEffectDependentControls();
+			if (BuilderTipPreferences.get().effectList()) minecraft.setScreen(new EffectSelectionScreen(this, selectedEffectMode));
+			else selectEffect(selectedEffectMode.next());
 		}).bounds(layout.innerLeft(), layout.effectButtonY(), layout.contentWidth(), layout.buttonHeight()).build());
 		this.optionsButton = this.addRenderableWidget(Button.builder(optionsMessage(), button -> {
 			if (selectedEffectMode == BuildEffectMode.REVERSE) selectedOptions = new BuildOptions(selectedOptions.startSide().next(), selectedOptions.dismantleStyle(), false, selectedOptions.placementPolicy());
@@ -400,6 +398,13 @@ public class BuilderMenuScreen extends Screen {
 
 	List<StructureLibrary.SelectionEntry> selectionEntries() { return List.copyOf(structureChoices); }
 	void refreshSelections() { syncStructureChoicesFromServer(); }
+	void selectEffect(BuildEffectMode mode) {
+		selectedEffectMode = java.util.Objects.requireNonNull(mode);
+		selectedOptions = new BuildOptions(selectedOptions.startSide(), selectedOptions.dismantleStyle(), false, selectedOptions.placementPolicy()).normalized(mode);
+		lastOptions = selectedOptions;
+		setFittedMessage(effectButton, effectMessage());
+		updateEffectDependentControls();
+	}
 	void selectStructure(String key) {
 		for (int i = 0; i < structureChoices.size(); i++) if (structureChoices.get(i).key().equals(key)) {
 			selectedStructureIndex = i;
@@ -570,7 +575,7 @@ public class BuilderMenuScreen extends Screen {
 		for (Button button : new Button[] {structureButton,folderButton,inspectButton,importButton,effectButton,captureFormatButton,startButton,captureButton,
 			pauseResumeButton,rollbackButton,cancelPreviewButton}) if (button != null) button.setHeight(layout.buttonHeight());
 		if (this.optionsButton != null) {
-			this.optionsButton.visible = hasModeOptions() && selectedEffectMode != BuildEffectMode.SET_CHANGE;
+			this.optionsButton.visible = hasModeOptions() && !selectedEffectMode.cinematic();
 			this.optionsButton.active = this.optionsButton.visible && (selectedEffectMode != BuildEffectMode.BUILDER_CHARGE || selectedOptions.replaceExistingBlocks());
 			this.optionsButton.setY(layout.optionsButtonY());
 			this.optionsButton.setHeight(layout.buttonHeight());
@@ -581,7 +586,7 @@ public class BuilderMenuScreen extends Screen {
 					? "screen.grand_builder.destructive_warning" : "screen.grand_builder.explosion_visual")) : null);
 		}
 		if (this.cinematicButton != null) {
-			this.cinematicButton.visible = this.cinematicButton.active = selectedEffectMode == BuildEffectMode.SET_CHANGE;
+			this.cinematicButton.visible = this.cinematicButton.active = selectedEffectMode.cinematic();
 			this.cinematicButton.setY(layout.optionsButtonY());
 			this.cinematicButton.setHeight(layout.buttonHeight());
 			this.cinematicButton.setValue(BuilderTipPreferences.get().cinematicCamera());
@@ -630,7 +635,7 @@ public class BuilderMenuScreen extends Screen {
 
 	private boolean hasModeOptions() {
 		return selectedEffectMode == BuildEffectMode.DISMANTLE || selectedEffectMode == BuildEffectMode.REVERSE
-			|| selectedEffectMode == BuildEffectMode.BUILDER_CHARGE || selectedEffectMode == BuildEffectMode.SET_CHANGE;
+			|| selectedEffectMode == BuildEffectMode.BUILDER_CHARGE || selectedEffectMode.cinematic();
 	}
 
 	private Component optionsMessage() {

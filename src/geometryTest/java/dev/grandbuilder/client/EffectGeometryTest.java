@@ -69,6 +69,7 @@ public final class EffectGeometryTest {
 		verifyDismantleConnections();
 		verifyOrbitalStrike();
 		verifySetChange();
+		verifyEuropa();
 		verifyBuildDirections();
 		verifyCadence();
 		verifyKinetic();
@@ -146,6 +147,41 @@ public final class EffectGeometryTest {
 		System.out.println("Set Change verified: 4 cinematic shots, portrait/wide framing, bounded textured poses, timing and owner codec.");
 	}
 
+	private static void verifyEuropa() {
+		check(BuildEffectMode.EUROPA_CALL.networkId() == 17 && BuildEffectMode.EUROPA_CALL.cinematic()
+			&& BuildEffectMode.EUROPA_CALL.hidesSpeed() && BuildEffectMode.EUROPA_CALL.instantReveal()
+			&& BuildEffectMode.EUROPA_CALL.revealDelayTicks() == 360 && BuildEffectMode.EUROPA_CALL.aftermathTicks() == 120, "Europa timing or stable IDs changed");
+		for (int[] pair : new int[][] {{0,0},{59,0},{60,1},{127,1},{128,2},{211,2},{212,3},{279,3},{280,4},{359,4}})
+			check(dev.grandbuilder.build.EuropaTimeline.shot(pair[0]) == pair[1], "Europa shot boundary skipped");
+		check(dev.grandbuilder.build.EuropaTimeline.flashAlpha(-1) == 0 && dev.grandbuilder.build.EuropaTimeline.flashAlpha(0) == 1
+			&& dev.grandbuilder.build.EuropaTimeline.flashAlpha(100) == 0, "White flash lasts more than five seconds");
+		double alpha = 1;
+		for (int tick = 0; tick <= 100; tick++) {
+			double next = dev.grandbuilder.build.EuropaTimeline.flashAlpha(tick);
+			check(next >= 0 && next <= alpha, "Flash fade is not monotonic"); alpha = next;
+		}
+		for (double age : new double[] {60,95,127,128,166,211,212,250,279,280,310,337,338,359}) {
+			Stats scene = new Stats(); EuropaGeometry.space(age, scene::accept);
+			check(scene.count > 1000 && scene.count < 30000, "Unbounded or missing space geometry");
+			for (int[] viewport : new int[][] {{640,360},{320,180},{427,240},{360,640},{1920,1080}}) {
+				var faces = SpaceSceneProjection.project(age, viewport[0], viewport[1]);
+				check(faces.size() > 100 && faces.size() < 7500, "Space projection empty or unbounded");
+				double previous = Double.POSITIVE_INFINITY; int onScreen = 0;
+				for (var face : faces) {
+					check(SpaceSceneProjection.signedArea(face.xy()) <= 0.001, "GUI culling hides a space face");
+					check(face.distance() > 0 && face.distance() <= previous, "Space depth ordering broke"); previous = face.distance();
+					for (int i = 0; i < 4; i++) {
+						float x = face.xy()[i * 2], y = face.xy()[i * 2 + 1];
+						check(Float.isFinite(x) && Float.isFinite(y), "Invalid perspective vertex");
+						if (x >= 0 && x <= viewport[0] && y >= viewport[1] / 12f && y <= viewport[1] * 11 / 12f) onScreen++;
+					}
+				}
+				check(onScreen > 400, "Space set fell outside viewport");
+			}
+		}
+		System.out.println("Europa verified: five shots, 100-tick flash, 70 portrait/wide projections, finite depth-sorted 3D meshes, instant timing and IDs.");
+	}
+
 	@SuppressWarnings("unchecked")
 	private static void verifyCinematicOwnership() {
 		try {
@@ -161,12 +197,12 @@ public final class EffectGeometryTest {
 				var outro = new BuildEffectPayload(java.util.UUID.randomUUID(), dimension, BlockPos.ZERO, new BlockPos(1,1,1),
 					16, BuildEffectPayload.PHASE_REVEAL, 80, 20, 1, 1, false, 0, false, owner);
 				scenes.put(outro.sceneId(), constructor.newInstance(outro));
-				for (int[] modePhase : new int[][] {{16,2}, {16,3}, {16,4}, {11,2}}) {
+				for (int[] modePhase : new int[][] {{16,2}, {16,3}, {16,4}, {11,2}, {17,1}, {17,3}, {17,4}}) {
 					var latest = new BuildEffectPayload(java.util.UUID.randomUUID(), dimension, new BlockPos(100,0,0), new BlockPos(101,1,1),
 						modePhase[0], modePhase[1], 100, 20, 0.2f, 1, false, 0, false, owner);
 					scenes.put(latest.sceneId(), constructor.newInstance(latest));
 					var selected = GrandBuilderClientEffects.cinematicFrame(0, owner);
-					check(modePhase[0] == 16 && modePhase[1] == 2 ? selected != null && selected.x() == 101 : selected == null,
+					check(modePhase[0] == 16 && modePhase[1] == 2 || modePhase[0] == 17 && modePhase[1] == 1 ? selected != null && selected.x() == 101 : selected == null,
 						"Previous outro reclaimed the camera from the latest build");
 					check(GrandBuilderClientEffects.cinematicFrame(0, java.util.UUID.randomUUID()) == null, "Nonowner cinematic camera");
 					scenes.remove(latest.sceneId());

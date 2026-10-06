@@ -34,6 +34,11 @@ public final class CinematicCamera {
 		if (client.player == null || client.level == null || client.screen != null || !BuilderTipPreferences.get().cinematicCamera()) return null;
 		var f = GrandBuilderClientEffects.cinematicFrame(partialTick, client.player.getUUID());
 		if (f == null) return null;
+		if (f.mode() == dev.grandbuilder.build.BuildEffectMode.EUROPA_CALL) {
+			if (f.revealing() && f.age() >= dev.grandbuilder.build.EuropaTimeline.FLASH) return null;
+			return new Shot(client.player.getEyePosition(partialTick), client.player.getYRot(), client.player.getXRot(), 0,
+				f.revealing() ? 5 : dev.grandbuilder.build.EuropaTimeline.shot(f.age()));
+		}
 		Shot shot = pose(f, client.getWindow().getGuiScaledWidth(), client.getWindow().getGuiScaledHeight(), client.options.fov().get());
 		// Rendering a shot must never request chunks, move the player or place a camera in an unloaded area.
 		if (shot.position().distanceToSqr(client.player.position()) > 192 * 192
@@ -45,10 +50,14 @@ public final class CinematicCamera {
 	public static void renderOverlay(net.minecraft.client.gui.GuiGraphics graphics, float partialTick) {
 		Minecraft client = Minecraft.getInstance();
 		if (current(partialTick) == null) return;
+		var frame = GrandBuilderClientEffects.cinematicFrame(partialTick, client.player.getUUID());
+		if (frame != null && frame.mode() == dev.grandbuilder.build.BuildEffectMode.EUROPA_CALL) {
+			EuropaCinematic.render(graphics, frame);
+			return;
+		}
 		int bar = Math.max(8, graphics.guiHeight() / 12);
 		graphics.fill(0, 0, graphics.guiWidth(), bar, 0xFF080B0D);
 		graphics.fill(0, graphics.guiHeight() - bar, graphics.guiWidth(), graphics.guiHeight(), 0xFF080B0D);
-		var frame = GrandBuilderClientEffects.cinematicFrame(partialTick, client.player.getUUID());
 		if (frame != null && frame.motionAge() < 80) {
 			var label = net.minecraft.network.chat.Component.translatable("screen.grand_builder.cinematic_skip", dev.grandbuilder.GrandBuilderModClient.cinematicKeyName());
 			graphics.drawString(client.font, label, 8, graphics.guiHeight() - bar + (bar - 8) / 2, 0xFFB7C4CA, false);

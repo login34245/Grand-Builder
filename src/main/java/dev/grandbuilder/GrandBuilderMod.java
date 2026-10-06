@@ -76,6 +76,11 @@ public class GrandBuilderMod implements ModInitializer {
 	public static final SoundEvent SET_OPEN = SoundEvent.createVariableRangeEvent(id("effect.set_open"));
 	public static final SoundEvent SET_SNAP = SoundEvent.createVariableRangeEvent(id("effect.set_snap"));
 	public static final SoundEvent SET_FINALE = SoundEvent.createVariableRangeEvent(id("effect.set_finale"));
+	public static final SoundEvent EUROPA_RADIO = SoundEvent.createVariableRangeEvent(id("effect.europa_radio"));
+	public static final SoundEvent EUROPA_RELAY = SoundEvent.createVariableRangeEvent(id("effect.europa_relay"));
+	public static final SoundEvent EUROPA_CHARGE = SoundEvent.createVariableRangeEvent(id("effect.europa_charge"));
+	public static final SoundEvent EUROPA_BEAM = SoundEvent.createVariableRangeEvent(id("effect.europa_beam"));
+	public static final SoundEvent EUROPA_FLASH = SoundEvent.createVariableRangeEvent(id("effect.europa_flash"));
 
 	public static final Item STRUCTURE_CORE = new StructureCoreItem(new Item.Properties()
 		.setId(STRUCTURE_CORE_KEY)
@@ -100,6 +105,8 @@ public class GrandBuilderMod implements ModInitializer {
 		Registry.register(BuiltInRegistries.SOUND_EVENT, SET_OPEN.location(), SET_OPEN);
 		Registry.register(BuiltInRegistries.SOUND_EVENT, SET_SNAP.location(), SET_SNAP);
 		Registry.register(BuiltInRegistries.SOUND_EVENT, SET_FINALE.location(), SET_FINALE);
+		for (SoundEvent event : new SoundEvent[] {EUROPA_RADIO, EUROPA_RELAY, EUROPA_CHARGE, EUROPA_BEAM, EUROPA_FLASH})
+			Registry.register(BuiltInRegistries.SOUND_EVENT, event.location(), event);
 		Registry.register(BuiltInRegistries.CREATIVE_MODE_TAB, CREATIVE_TAB_KEY, FabricItemGroup.builder()
 			.title(Component.translatable("itemGroup.grand_builder.main"))
 			.icon(() -> new ItemStack(STRUCTURE_CORE))

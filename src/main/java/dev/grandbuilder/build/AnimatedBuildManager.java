@@ -870,7 +870,8 @@ public final class AnimatedBuildManager {
 						owner.displayClientMessage(Component.translatable("message.grand_builder.completed_with_skips", job.skippedBlocks), true);
 					}
 				}
-				level.playSound(null, job.origin, SoundEvents.BEACON_ACTIVATE, SoundSource.BLOCKS, 1.0f, 1.0f);
+				if (job.effectMode != BuildEffectMode.EUROPA_CALL)
+					level.playSound(null, job.origin, SoundEvents.BEACON_ACTIVATE, SoundSource.BLOCKS, 1.0f, 1.0f);
 				iterator.remove();
 			}
 		}
@@ -2394,7 +2395,8 @@ public final class AnimatedBuildManager {
 			double centerX = (min.getX() + max.getX() + 1.0) * 0.5;
 			double centerZ = (min.getZ() + max.getZ() + 1.0) * 0.5;
 			for (ServerPlayer viewer : level.players()) {
-				if (viewer.distanceToSqr(centerX, (min.getY() + max.getY() + 1.0) * 0.5, centerZ) <= 256.0 * 256.0
+				if ((visual == BuildEffectMode.EUROPA_CALL && viewer.getUUID().equals(ownerId)
+					|| viewer.distanceToSqr(centerX, (min.getY() + max.getY() + 1.0) * 0.5, centerZ) <= 256.0 * 256.0)
 					&& ServerPlayNetworking.canSend(viewer, BuildEffectPayload.TYPE)) {
 					ServerPlayNetworking.send(viewer, payload);
 				}
@@ -2859,6 +2861,7 @@ public final class AnimatedBuildManager {
 						level.playSound(null, center, SoundEvents.AMETHYST_BLOCK_RESONATE, SoundSource.BLOCKS, 0.65f, 0.6f+effectTick/92f);
 					if (effectTick == 75) level.playSound(null, center, SoundEvents.TRIDENT_THROW.value(), SoundSource.BLOCKS, 1.4f, 0.5f);
 				}
+				case EUROPA_CALL -> { }
 				case UFO_INVASION -> {
 					if ((effectTick % 16) == 1) {
 						level.playSound(null, center, SoundEvents.PORTAL_AMBIENT, SoundSource.BLOCKS, 0.45f, 0.65f);
@@ -2919,6 +2922,7 @@ public final class AnimatedBuildManager {
 		private void spawnInstantRevealBurst(ServerLevel level) {
 			BlockPos center = effectCenter(level);
 			switch (options.visualMode(effectMode)) {
+				case EUROPA_CALL -> level.playSound(null, center, GrandBuilderMod.EUROPA_BEAM, SoundSource.BLOCKS, 0.7f, 0.7f);
 				case ORBITAL_STRIKE -> {
 					level.playSound(null, center, SoundEvents.TRIDENT_THUNDER.value(), SoundSource.BLOCKS, 2.0f, 0.5f);
 					level.playSound(null, center, SoundEvents.GENERIC_EXPLODE.value(), SoundSource.BLOCKS, 1.6f, 0.65f);
